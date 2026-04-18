@@ -23,7 +23,7 @@ class BiasDetector:
     IPDA Layer 1 Component: Structural Orientation Engine.
     Identifies institutional bias relative to the 20/40/60-day equilibrium.
     """
-    def __init__(self, lookbacks=[5-7], neutral_threshold_atr: float = 0.15):
+    def __init__(self, lookbacks=[20, 40, 60], neutral_threshold_atr: float = 0.15):
         self.lookbacks = lookbacks
         self.threshold_mult = neutral_threshold_atr # Neutral if within 0.15 * ATR
 

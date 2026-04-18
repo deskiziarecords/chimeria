@@ -27,8 +27,9 @@ class MandraGate:
         self.max_risk = max_risk      # 2% Capital Hard Cap [12]
         self.prev_energy = 0.0
 
+    @staticmethod
     @jax.jit
-    def calculate_energy_state(self, phi: jnp.ndarray, stability_score: float) -> jnp.ndarray:
+    def calculate_energy_state(phi: jnp.ndarray, stability_score: float) -> jnp.ndarray:
         """
         Calculates the energy landscape of the current signal manifold.
         E = sum(embedding_differences^2) + sum(curvature^2) [13].

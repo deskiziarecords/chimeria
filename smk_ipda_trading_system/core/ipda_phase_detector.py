@@ -22,7 +22,7 @@ class IPDACompiler:
     Defines structural context by synchronizing 20, 40, and 60-day ranges.
     Detects transition from consolidation to institutional delivery.
     """
-    def __init__(self, lookbacks=[9-11]):
+    def __init__(self, lookbacks=[20, 40, 60]):
         self.lookbacks = lookbacks
         self.state = 'INVALID'
         self.ranges = {lb: {'high': None, 'low': None, 'mid': None} for lb in lookbacks}
@@ -40,7 +40,9 @@ class IPDACompiler:
 
     def detect_phase(self, current_price: float, volume: float, avg_vol: float) -> str:
         """Determines the AMD state based on structural proximity and energy [15, 16]."""
-        h60, l60 = self.ranges[11]['high'], self.ranges[11]['low']
+        # Use the largest available lookback for the structural boundaries
+        max_lb = max(self.lookbacks)
+        h60, l60 = self.ranges[max_lb]['high'], self.ranges[max_lb]['low']
         
         # 1. Accumulation: Price hovering near Equilibrium [2, 17]
         if abs(current_price - self.equilibrium) < (0.15 * (h60 - l60)):
