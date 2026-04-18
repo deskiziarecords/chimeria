@@ -1,6 +1,6 @@
 """
 backend/main.py
-QUIMERIA / SMK FastAPI Backend - Final Version
+QUIMERIA / SMK FastAPI Backend - Final Corrected Version
 """
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
@@ -15,9 +15,16 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-# SMK imports
-from smk_pipeline import SMKPipeline
-from data_connectors import load_csv_text, fetch_bitget, fetch_oanda, generate_sample
+# ==================== CORRECT IMPORTS ====================
+# Import from the same backend package (relative imports)
+from .smk_pipeline import SMKPipeline
+from .data_connectors import (
+    load_csv_text,
+    fetch_bitget,
+    fetch_oanda,
+    generate_sample
+)
+# ========================================================
 
 app = FastAPI(
     title="QUIMERIA SMK API",
@@ -72,13 +79,13 @@ async def root():
 @app.post("/api/load/csv")
 async def load_csv(payload: CSVPayload):
     try:
-        bars = await load_csv_text(payload.text) if asyncio.iscoroutinefunction(load_csv_text) else load_csv_text(payload.text)
+        bars = load_csv_text(payload.text)
         if not bars:
-            raise HTTPException(400, "Failed to parse CSV")
+            raise HTTPException(status_code=400, detail="Failed to parse CSV")
         pipeline.load_bars(bars)
         return {"status": "ok", "count": len(bars), "source": payload.filename}
     except Exception as e:
-        raise HTTPException(500, f"Error loading CSV: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error loading CSV: {str(e)}")
 
 @app.post("/api/load/bitget")
 async def load_bitget(payload: BitgetPayload):
@@ -100,7 +107,7 @@ async def load_sample():
 
 @app.get("/api/bars")
 async def get_bars():
-    return {"bars": pipeline.raw_bars[:100]}  # limit for performance
+    return {"bars": pipeline.raw_bars[:100]}
 
 @app.get("/api/status")
 async def get_status():
