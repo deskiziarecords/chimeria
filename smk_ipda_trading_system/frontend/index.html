@@ -353,8 +353,11 @@ input[type=file]{display:none}
 </div>
 
 <script>
-const API_BASE=window.location.origin;
-const WS_BASE=API_BASE.replace(/^http/,'ws');
+// Handle both served (http://localhost:8000) and file:// opening
+const API_BASE = (window.location.protocol === 'file:')
+  ? 'http://localhost:8000'
+  : window.location.origin;
+const WS_BASE = API_BASE.replace(/^http/, 'ws');
 
 // CHART
 let chart,candles,volSeries,drHL,drLL,drEL;
@@ -376,9 +379,14 @@ function initChart(){
     wickUpColor:'#aad4b8',wickDownColor:'#e8b8b8',
   });
   volSeries=chart.addHistogramSeries({priceScaleId:'vol',scaleMargins:{top:.88,bottom:0}});
-  candles.subscribeCrosshairMove(p=>{
-    if(p?.seriesData?.has(candles)){const d=p.seriesData.get(candles);
-      document.getElementById('hud-ohlc').textContent=`O:${d.open?.toFixed(5)} H:${d.high?.toFixed(5)} L:${d.low?.toFixed(5)} C:${d.close?.toFixed(5)}`;}
+  // LWC v4: crosshair subscribe is on chart, data accessed via param
+  chart.subscribeCrosshairMove(p=>{
+    if(!p || !p.seriesData) return;
+    const d = p.seriesData.get(candles);
+    if(d){
+      document.getElementById('hud-ohlc').textContent=
+        'O:'+d.open.toFixed(5)+' H:'+d.high.toFixed(5)+' L:'+d.low.toFixed(5)+' C:'+d.close.toFixed(5);
+    }
   });
   window.addEventListener('resize',()=>chart.applyOptions({width:el.offsetWidth,height:el.offsetHeight}));
 }
