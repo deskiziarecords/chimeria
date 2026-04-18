@@ -31,7 +31,7 @@ if errorlevel 1 (
 
 REM Install deps
 echo [1/3] Installing Python deps...
-pip install fastapi uvicorn httpx numpy pandas scipy scikit-learn pytz python-multipart --quiet
+pip install fastapi uvicorn httpx numpy pandas scipy scikit-learn statsmodels pytz python-multipart --quiet
 
 REM Export SMK_DIR so smk_pipeline.py can find the modules
 set "SMK_DIR=%SMK_ROOT%"
