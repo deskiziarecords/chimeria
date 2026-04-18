@@ -1,6 +1,5 @@
 """
 QUIMERIA / SMK Backend — FastAPI
-Exposes the full SMK pipeline over HTTP + WebSocket
 """
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,27 +9,35 @@ import uvicorn, asyncio, json, os
 from typing import Optional
 from pydantic import BaseModel
 
-from smk_pipeline import SMKPipeline
-from data_connectors import load_csv_text, fetch_bitget, fetch_oanda
-
 app = FastAPI(title="QUIMERIA SMK API")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
+                   allow_methods=["*"], allow_headers=["*"])
 
-app.add_middleware(CORSMiddleware,
-    allow_origins=["*"], allow_credentials=True,
-    allow_methods=["*"], allow_headers=["*"])
+# ── FRONTEND ──────────────────────────────────────────────────────────────────
+_here = os.path.dirname(os.path.abspath(__file__))
+FRONTEND = os.path.normpath(os.path.join(_here, "..", "frontend"))
 
-# Serve the frontend
-FRONTEND = os.path.join(os.path.dirname(__file__), "..", "frontend")
-app.mount("/static", StaticFiles(directory=FRONTEND), name="static")
+if os.path.isdir(FRONTEND):
+    app.mount("/static", StaticFiles(directory=FRONTEND), name="static")
 
 @app.get("/")
 def root():
-    return FileResponse(os.path.join(FRONTEND, "index.html"))
+    idx = os.path.join(FRONTEND, "index.html")
+    if os.path.exists(idx):
+        return FileResponse(idx)
+    return {"status": "QUIMERIA SMK API running — frontend not found at " + FRONTEND}
 
-# ─── SMK PIPELINE (singleton) ────────────────────────────────────────────────
-pipeline = SMKPipeline()
+# ── PIPELINE (lazy init, crash-safe) ─────────────────────────────────────────
+_pipeline = None
 
-# ─── REST ENDPOINTS ───────────────────────────────────────────────────────────
+def get_pipeline():
+    global _pipeline
+    if _pipeline is None:
+        from smk_pipeline import SMKPipeline
+        _pipeline = SMKPipeline()
+    return _pipeline
+
+# ── MODELS ───────────────────────────────────────────────────────────────────
 class CSVPayload(BaseModel):
     text: str
     filename: Optional[str] = "upload.csv"
@@ -49,81 +56,90 @@ class OandaPayload(BaseModel):
     granularity: str = "M5"
     count: int = 300
 
+# ── REST ENDPOINTS ────────────────────────────────────────────────────────────
 @app.post("/api/load/csv")
 async def load_csv(payload: CSVPayload):
+    from data_connectors import load_csv_text
     bars = load_csv_text(payload.text)
     if not bars:
         raise HTTPException(400, "CSV parse failed — need datetime,open,high,low,close,volume")
-    pipeline.load_bars(bars)
+    get_pipeline().load_bars(bars)
     return {"status": "ok", "count": len(bars), "source": payload.filename}
 
 @app.post("/api/load/bitget")
 async def load_bitget(payload: BitgetPayload):
-    bars = await fetch_bitget(payload.api_key, payload.api_secret, payload.symbol, payload.granularity, payload.limit)
-    pipeline.load_bars(bars)
+    from data_connectors import fetch_bitget
+    bars = await fetch_bitget(payload.api_key, payload.api_secret,
+                               payload.symbol, payload.granularity, payload.limit)
+    get_pipeline().load_bars(bars)
     return {"status": "ok", "count": len(bars), "source": f"BITGET:{payload.symbol}"}
 
 @app.post("/api/load/oanda")
 async def load_oanda(payload: OandaPayload):
-    bars = await fetch_oanda(payload.token, payload.account_id, payload.instrument, payload.granularity, payload.count)
-    pipeline.load_bars(bars)
+    from data_connectors import fetch_oanda
+    bars = await fetch_oanda(payload.token, payload.account_id,
+                              payload.instrument, payload.granularity, payload.count)
+    get_pipeline().load_bars(bars)
     return {"status": "ok", "count": len(bars), "source": f"OANDA:{payload.instrument}"}
 
 @app.post("/api/load/sample")
 async def load_sample():
     from data_connectors import generate_sample
     bars = generate_sample(300)
-    pipeline.load_bars(bars)
+    get_pipeline().load_bars(bars)
     return {"status": "ok", "count": len(bars), "source": "SAMPLE:EURUSD-5M"}
 
 @app.get("/api/bars")
 def get_bars():
-    return {"bars": pipeline.raw_bars}
+    return {"bars": get_pipeline().raw_bars[:100]}
 
 @app.get("/api/status")
 def get_status():
-    return pipeline.get_status()
+    return get_pipeline().get_status()
 
-# ─── WEBSOCKET — streaming bar-by-bar analysis ───────────────────────────────
+# ── WEBSOCKET ─────────────────────────────────────────────────────────────────
 @app.websocket("/ws/stream")
 async def stream(ws: WebSocket):
     await ws.accept()
-    pipeline.reset_cursor()
+    p = get_pipeline()
+    p.reset_cursor()
     try:
         async for msg in ws.iter_text():
             cmd = json.loads(msg)
             action = cmd.get("action")
 
             if action == "step":
-                result = pipeline.step()
-                if result:
-                    await ws.send_json({"type": "bar", "data": result})
-                else:
-                    await ws.send_json({"type": "done"})
+                result = p.step()
+                await ws.send_json({"type": "bar", "data": result} if result else {"type": "done"})
 
             elif action == "run":
                 speed_ms = cmd.get("speed", 300)
-                pipeline.running = True
-                while pipeline.running:
-                    result = pipeline.step()
+                p.running = True
+                while p.running:
+                    result = p.step()
                     if result:
                         await ws.send_json({"type": "bar", "data": result})
                         await asyncio.sleep(speed_ms / 1000.0)
                     else:
                         await ws.send_json({"type": "done"})
-                        pipeline.running = False
+                        p.running = False
                         break
 
             elif action == "stop":
-                pipeline.running = False
+                p.running = False
                 await ws.send_json({"type": "stopped"})
 
             elif action == "reset":
-                pipeline.reset_cursor()
+                p.reset_cursor()
                 await ws.send_json({"type": "reset"})
 
     except WebSocketDisconnect:
-        pipeline.running = False
+        p.running = False
+    except Exception as e:
+        try:
+            await ws.send_json({"type": "error", "message": str(e)})
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
