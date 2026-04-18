@@ -10,6 +10,7 @@ import pandas as pd
 import numpy as np
 from typing import Dict, Optional, Any
 from datetime import datetime
+import traceback
 
 # Core imports
 from core.bias_detector import BiasDetector
@@ -79,6 +80,20 @@ class SovereignMarketKernel:
             return {"error": "Insufficient data (need ≥60 bars)", "status": "waiting"}
 
         try:
+            # Ensure ATR is present for sensors that need it
+            if 'atr' not in df.columns:
+                # Simple ATR calculation if not provided
+                high_low = df['high'] - df['low']
+                high_close = np.abs(df['high'] - df['close'].shift())
+                low_close = np.abs(df['low'] - df['close'].shift())
+                tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+                df = df.assign(atr=tr.rolling(window=20).mean())
+                df['atr'] = df['atr'].ffill().fillna(0.001)
+
+            # Compatibility for sensors using 'atr20'
+            if 'atr20' not in df.columns:
+                df = df.assign(atr20=df['atr'])
+
             # 1. IPDA Layer 1 - Structural Context
             phase_state = self.ipda.process_market_state(df)
             bias_state = self.bias.detect_bias(df)
@@ -182,6 +197,7 @@ class SovereignMarketKernel:
             return result
 
         except Exception as e:
+            traceback.print_exc()
             print(f"❌ Error in on_new_bar: {e}")
             return {"error": str(e), "status": "failed"}
 

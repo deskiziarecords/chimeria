@@ -23,7 +23,7 @@ asyncio>=3.4.3
 # Data Fetching
 ccxt>=4.0.0
 yfinance>=0.2.40
-MetaTrader5>=5.0.0
+# MetaTrader5>=5.0.0 (Windows only)
 
 # Signal Processing & Advanced Analysis
 jax>=0.4.0

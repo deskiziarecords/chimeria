@@ -39,7 +39,7 @@ class IPDAExpansionPredictor:
         
         # 1. Evaluate λ1 Phase Entrapment
         v_ratio = self.calculate_volatility_ratio(close_prices, atr20)
-        is_entrapped = v_ratio < self.delta [3]
+        is_entrapped = v_ratio < self.delta
         
         if is_entrapped:
             self.timer += 1
@@ -54,7 +54,7 @@ class IPDAExpansionPredictor:
         # 3. Check for Displacement (λ6 Veto check for early activation) [12, 13]
         last_candle = ohlcv_window.iloc[-1]
         body_ratio = abs(last_candle['close'] - last_candle['open']) / (last_candle['high'] - last_candle['low'] + 1e-9)
-        has_displacement = body_ratio > 0.75 and (last_candle['high'] - last_candle['low']) > (1.2 * atr20) [14]
+        has_displacement = body_ratio > 0.75 and (last_candle['high'] - last_candle['low']) > (1.2 * atr20)
 
         # 4. State Assignment and DOL Targeting [11]
         current_state = 0 # ACCUMULATION

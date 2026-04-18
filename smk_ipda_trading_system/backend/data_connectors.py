@@ -72,7 +72,7 @@ async def fetch_oanda(token: str, account_id: str, instrument: str, granularity:
 def generate_sample(count: int = 300, symbol: str = "EURUSD") -> List[Dict]:
     """Generate realistic sample OHLCV data for testing"""
     np.random.seed(42)
-    dates = pd.date_range(end=datetime.now(), periods=count, freq='5T')
+    dates = pd.date_range(end=datetime.now(), periods=count, freq='5min')
     
     # Random walk with some trend
     close = 1.0850 + np.cumsum(np.random.randn(count) * 0.0003)

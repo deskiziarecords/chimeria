@@ -23,7 +23,7 @@ class DealingRangeDetector:
     Identifies institutional address space via 20/40/60-period lookbacks.
     Calculates the Setup Validity Boundary (Equilibrium).
     """
-    def __init__(self, lookbacks=[6-8]):
+    def __init__(self, lookbacks=[20, 40, 60]):
         self.lookbacks = lookbacks
         self.state = "ACCUMULATION"
         self.equilibrium = None
@@ -44,8 +44,9 @@ class DealingRangeDetector:
             }
 
         # 2. Identify the L60 Range (Broadest Structural Constraint) [1]
-        l60_h = ranges[8]['high']
-        l60_l = ranges[8]['low']
+        max_lb = max(self.lookbacks)
+        l60_h = ranges[max_lb]['high']
+        l60_l = ranges[max_lb]['low']
 
         # 3. Calculate Equilibrium (The Market's 'Fair Price') [3, 9]
         # Formal SMK logic uses the mean of all three lookback midpoints

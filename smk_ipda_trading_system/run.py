@@ -1,4 +1,4 @@
-from main import SovereignMarketKernel
+from SovereignMarketKernel import SovereignMarketKernel
 import pandas as pd
 
 kernel = SovereignMarketKernel()
