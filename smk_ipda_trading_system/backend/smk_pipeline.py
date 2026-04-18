@@ -41,7 +41,7 @@ class SMKPipeline:
         self.cursor = 0
         self.last_result = None
 
-        print(f"📊 Loaded {len(bars)} bars | Date range: {self.df.index[0]} → {self.df.index[-1]}")
+        print(f"Loaded {len(bars)} bars | Date range: {self.df.index[0]} → {self.df.index[-1]}")
 
     def _convert_to_dataframe(self, bars: List[Dict]) -> pd.DataFrame:
         """Convert list of dicts to pandas DataFrame with proper datetime index"""
