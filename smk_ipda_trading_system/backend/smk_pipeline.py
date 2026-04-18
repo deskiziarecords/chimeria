@@ -2,11 +2,63 @@
 SMK Pipeline — wraps all detector modules into a single bar-by-bar processor.
 This is the bridge between the FastAPI server and the actual SMK modules.
 """
+import sys
+import os
 import numpy as np
 import pandas as pd
 from typing import List, Dict, Optional, Any
 from dataclasses import asdict
 import traceback
+
+# ── PATH RESOLUTION ──────────────────────────────────────────────────────────
+# backend/ lives inside smk_ipda_trading_system/backend/
+# The SMK modules (core/, lambda_sensors/, etc.) live in smk_ipda_trading_system/
+# We need to add smk_ipda_trading_system/ to sys.path so imports resolve.
+
+def _resolve_smk_root() -> str:
+    """
+    Walk up from this file to find the smk_ipda_trading_system root.
+    Handles both layouts:
+      Layout A:  smk_ipda_trading_system/backend/smk_pipeline.py  (modules are ../core etc.)
+      Layout B:  quimeria/backend/smk_pipeline.py                  (modules are ../../smk_ipda_trading_system/core etc.)
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+
+    # Layout A: this file IS inside smk_ipda_trading_system/backend/
+    # parent dir should have core/, lambda_sensors/ etc.
+    parent = os.path.dirname(here)
+    if os.path.isdir(os.path.join(parent, "core")):
+        return parent
+
+    # Layout B: standalone quimeria/backend/ — SMK is a sibling folder
+    # Check common sibling names
+    for sibling in ["smk_ipda_trading_system", "smk", "SMK"]:
+        candidate = os.path.join(parent, sibling)
+        if os.path.isdir(os.path.join(candidate, "core")):
+            return candidate
+
+    # Layout C: env var override
+    env_dir = os.environ.get("SMK_DIR", "")
+    if env_dir and os.path.isdir(os.path.join(env_dir, "core")):
+        return env_dir
+
+    # Layout D: check if CWD contains smk_ipda_trading_system
+    for cwd_child in ["smk_ipda_trading_system", "."]:
+        candidate = os.path.join(os.getcwd(), cwd_child)
+        if os.path.isdir(os.path.join(candidate, "core")):
+            return candidate
+
+    return ""  # not found — fallback mode
+
+
+_SMK_ROOT = _resolve_smk_root()
+if _SMK_ROOT and _SMK_ROOT not in sys.path:
+    sys.path.insert(0, _SMK_ROOT)
+    print(f"[SMK] Module root resolved: {_SMK_ROOT}")
+else:
+    print(f"[SMK] WARNING: SMK root not found — running numpy fallback mode")
+    print(f"[SMK] Set SMK_DIR=C:\\path\\to\\smk_ipda_trading_system to fix this")
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 class SMKPipeline:
