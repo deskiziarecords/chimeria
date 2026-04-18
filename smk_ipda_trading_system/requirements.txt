@@ -1,8 +1,53 @@
-numpy>=1.24
-pandas>=2.0
-scipy>=1.10
-statsmodels>=0.14
+# =============================================
+# QUIMERIA / Sovereign Market Kernel (SMK)
+# Core Dependencies
+# =============================================
+
+# Core Data & Scientific Computing
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.10.0
+
+# Machine Learning & Modeling
+scikit-learn>=1.3.0
+xgboost>=2.0.0
+
+# FastAPI Backend
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# Async & WebSocket support
+asyncio>=3.4.3
+
+# Data Fetching
+ccxt>=4.0.0
+yfinance>=0.2.40
+MetaTrader5>=5.0.0
+
+# Signal Processing & Advanced Analysis
 jax>=0.4.0
-ripser
-scikit-learn
-pytz
+jaxlib>=0.4.0
+ripser>=0.6.0                  # For topological_fracture_detector
+statsmodels>=0.14.0
+
+# Visualization (for outputs/)
+matplotlib>=3.8.0
+seaborn>=0.13.0
+
+# Utilities
+pytz>=2023.3
+python-dateutil>=2.8.0
+
+# Optional: Development & Testing
+pytest>=7.4.0
+black>=23.0.0
+isort>=5.12.0
+
+# =============================================
+# Notes:
+# - jax + jaxlib: Required for Mandra kernels and SignalFusion
+# - ripser: Required for topological_fracture_detector.py
+# - ccxt: Used in data_connectors for Bitget
+# - Run: pip install -r requirements.txt
+# =============================================
