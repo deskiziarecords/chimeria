@@ -1,6 +1,368 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QUIMERIA • Sovereign Market Kernel</title>
+    <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: #f8f9fa;
+            color: #1f2937;
+            font-size: 13px;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .shell {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        /* HEADER */
+        .header {
+            height: 48px;
+            background: white;
+            border-bottom: 1px solid #e5e7eb;
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            font-weight: 600;
+            font-size: 15px;
+            color: #111827;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        .logo {
+            color: #2563eb;
+            letter-spacing: -0.5px;
+        }
+        .status-pill {
+            margin-left: 16px;
+            padding: 4px 12px;
+            border-radius: 9999px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .status-ok { background: #ecfdf5; color: #10b981; border: 1px solid #a7f3d0; }
+        .status-halt { background: #fef2f2; color: #ef4444; border: 1px solid #fecaca; }
+
+        /* MAIN CONTENT */
+        .main {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* LEFT PANEL */
+        .left {
+            width: 210px;
+            background: white;
+            border-right: 1px solid #e5e7eb;
+            overflow-y: auto;
+        }
+        .panel-title {
+            padding: 12px 16px;
+            background: #f1f5f9;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            color: #64748b;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .sensor-row {
+            padding: 8px 16px;
+            border-bottom: 1px solid #f1f5f9;
+            display: flex;
+            align-items: center;
+            font-size: 12px;
+        }
+        .sensor-name { flex: 1; color: #475569; }
+        .sensor-bar-container { flex: 1; height: 4px; background: #e2e8f0; border-radius: 2px; margin: 0 10px; }
+        .sensor-bar { height: 100%; background: #3b82f6; border-radius: 2px; transition: width 0.4s ease; }
+
+        /* CENTER */
+        .center {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        .toolbar {
+            padding: 8px 16px;
+            background: white;
+            border-bottom: 1px solid #e5e7eb;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .btn {
+            padding: 6px 14px;
+            border: 1px solid #d1d5db;
+            background: white;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .btn:hover { background: #f8fafc; }
+        .btn-primary { background: #2563eb; color: white; border: none; }
+        .btn-primary:hover { background: #1d4ed8; }
+
+        .chart-container {
+            flex: 1;
+            position: relative;
+            background: white;
+        }
+
+        /* RIGHT PANEL */
+        .right {
+            width: 240px;
+            background: white;
+            border-left: 1px solid #e5e7eb;
+            overflow-y: auto;
+            padding: 12px;
+        }
+        .card {
+            background: #f8fafc;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+        .card-title {
+            font-size: 11px;
+            font-weight: 600;
+            color: #64748b;
+            margin-bottom: 8px;
+            letter-spacing: 0.5px;
+        }
+        .value {
+            font-size: 15px;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+        }
+        .veto-box {
+            padding: 10px;
+            text-align: center;
+            font-weight: 600;
+            border-radius: 8px;
+            margin-bottom: 12px;
+        }
+        .veto-ok { background: #ecfdf5; color: #10b981; border: 1px solid #a7f3d0; }
+        .veto-halt { background: #fef2f2; color: #ef4444; border: 1px solid #fecaca; }
+
+        /* FOOTER CONTROLS */
+        .footer {
+            height: 52px;
+            background: white;
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            gap: 10px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="shell">
+        <!-- HEADER -->
+        <div class="header">
+            <span class="logo">QUIMERIA • SMK</span>
+            <span class="status-pill status-ok" id="sys-status">SYSTEM ONLINE</span>
+            <span class="status-pill" id="amd-status" style="margin-left:12px">AMD: ACCUMULATION</span>
+            <div style="margin-left:auto; font-size:12px; color:#64748b" id="bar-info">BAR 0 / 0</div>
+        </div>
+
+        <div class="main">
+            <!-- LEFT: Lambda Sensors -->
+            <div class="left">
+                <div class="panel-title">LAMBDA SENSORS</div>
+                <div id="sensors"></div>
+            </div>
+
+            <!-- CENTER: Chart -->
+            <div class="center">
+                <div class="toolbar">
+                    <button class="btn" onclick="openSourceModal()">Data Source</button>
+                    <button class="btn btn-primary" id="btn-run" onclick="startStream()">▶ Run</button>
+                    <button class="btn" id="btn-stop" onclick="stopStream()" style="display:none">■ Stop</button>
+                    <button class="btn" onclick="stepOnce()">Step</button>
+                    <button class="btn" onclick="resetSystem()">Reset</button>
+                    <select id="speed" class="btn" style="padding:6px 10px">
+                        <option value="500">0.5×</option>
+                        <option value="300" selected>1×</option>
+                        <option value="100">3×</option>
+                        <option value="30">10×</option>
+                    </select>
+                    <span style="margin-left:auto; color:#64748b; font-size:12px" id="source-info">No data loaded</span>
+                </div>
+                <div class="chart-container">
+                    <div id="chart"></div>
+                </div>
+            </div>
+
+            <!-- RIGHT: Status -->
+            <div class="right">
+                <div class="veto-box veto-ok" id="veto-box">EXECUTION ENABLED</div>
+
+                <div class="card">
+                    <div class="card-title">FUSED SIGNAL</div>
+                    <div class="value" id="fused" style="color:#2563eb">0.0000</div>
+                    <div style="font-size:11px;color:#64748b;margin-top:4px" id="regime">REGIME: STABLE</div>
+                </div>
+
+                <div class="card">
+                    <div class="card-title">DEALING RANGE</div>
+                    <div style="display:flex;justify-content:space-between;font-size:12px">
+                        <div>High: <span id="dr-high" style="color:#ef4444">--</span></div>
+                        <div>EQ: <span id="dr-eq" style="color:#f59e0b">--</span></div>
+                        <div>Low: <span id="dr-low" style="color:#10b981">--</span></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-title">MANDRA GATE</div>
+                    <div id="mandra-status" style="color:#10b981">ΔE ≥ 0 — PASS</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- FOOTER -->
+        <div class="footer">
+            <span id="footer-status">Ready — Load data to begin analysis</span>
+        </div>
+    </div>
+
+    <!-- SOURCE MODAL -->
+    <div id="source-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); align-items:center; justify-content:center; z-index:1000">
+        <div style="background:white; padding:24px; border-radius:8px; width:380px">
+            <h2 style="margin-bottom:16px; color:#1f2937">Select Data Source</h2>
+            <button onclick="loadSample()" style="width:100%; padding:12px; margin:8px 0; background:#2563eb; color:white; border:none; border-radius:6px; cursor:pointer">Load Sample Data (EURUSD 5M)</button>
+            <button onclick="hideModal()" style="width:100%; padding:12px; background:#f1f5f9; border:1px solid #d1d5db; border-radius:6px; cursor:pointer">Cancel</button>
+        </div>
+    </div>
+
+    <script>
+        let chart, candleSeries, volumeSeries;
+        let ws = null;
+        let isRunning = false;
+
+        function initChart() {
+            const container = document.getElementById('chart');
+            chart = LightweightCharts.createChart(container, {
+                width: container.clientWidth,
+                height: container.clientHeight,
+                layout: { background: { color: '#ffffff' }, textColor: '#64748b' },
+                grid: { vertLines: { color: '#f1f5f9' }, horzLines: { color: '#f1f5f9' } },
+                rightPriceScale: { borderColor: '#e5e7eb' },
+                timeScale: { borderColor: '#e5e7eb', timeVisible: true }
+            });
+
+            candleSeries = chart.addCandlestickSeries({
+                upColor: '#10b981',
+                downColor: '#ef4444',
+                borderUpColor: '#10b981',
+                borderDownColor: '#ef4444'
+            });
+
+            volumeSeries = chart.addHistogramSeries({
+                color: '#64748b33',
+                priceScaleId: 'volume',
+                scaleMargins: { top: 0.85, bottom: 0 }
+            });
+
+            window.addEventListener('resize', () => {
+                chart.resize(container.clientWidth, container.clientHeight);
+            });
+        }
+
+        function connectWS() {
+            if (ws) ws.close();
+            ws = new WebSocket(`ws://${window.location.host}/ws/stream`);
+
+            ws.onopen = () => console.log("WebSocket connected");
+            ws.onmessage = (e) => {
+                const msg = JSON.parse(e.data);
+                if (msg.type === "bar") handleBar(msg.data);
+            };
+            ws.onclose = () => console.log("WebSocket closed");
+        }
+
+        function handleBar(data) {
+            const bar = data.bar;
+            const analysis = data.analysis || {};
+
+            candleSeries.update({
+                time: Math.floor(new Date(bar.timestamp).getTime() / 1000),
+                open: bar.open,
+                high: bar.high,
+                low: bar.low,
+                close: bar.close
+            });
+
+            volumeSeries.update({
+                time: Math.floor(new Date(bar.timestamp).getTime() / 1000),
+                value: bar.volume
+            });
+
+            document.getElementById('fused').textContent = analysis.fused_signal ? analysis.fused_signal.toFixed(4) : '--';
+            document.getElementById('regime').textContent = `REGIME: ${analysis.regime || 'STABLE'}`;
+            document.getElementById('veto-box').textContent = analysis.trade_allowed ? "EXECUTION ENABLED" : "EXECUTION HALTED";
+            document.getElementById('veto-box').className = `veto-box ${analysis.trade_allowed ? 'veto-ok' : 'veto-halt'}`;
+        }
+
+        function startStream() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) connectWS();
+            isRunning = true;
+            document.getElementById('btn-run').style.display = 'none';
+            document.getElementById('btn-stop').style.display = 'inline-block';
+            ws.send(JSON.stringify({ action: "run", speed: parseInt(document.getElementById('speed').value) }));
+        }
+
+        function stopStream() {
+            isRunning = false;
+            if (ws) ws.send(JSON.stringify({ action: "stop" }));
+            document.getElementById('btn-run').style.display = 'inline-block';
+            document.getElementById('btn-stop').style.display = 'none';
+        }
+
+        function stepOnce() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) connectWS();
+            ws.send(JSON.stringify({ action: "step" }));
+        }
+
+        function resetSystem() {
+            if (ws) ws.send(JSON.stringify({ action: "reset" }));
+        }
+
+        function loadSample() {
+            fetch('/api/load/sample', { method: 'POST' })
+                .then(() => {
+                    document.getElementById('source-info').textContent = "Sample Data Loaded";
+                    document.getElementById('btn-run').disabled = false;
+                    hideModal();
+                });
+        }
+
+        function openSourceModal() {
+            document.getElementById('source-modal').style.display = 'flex';
+        }
+
+        function hideModal() {
+            document.getElementById('source-modal').style.display = 'none';
+        }
+
+        // Initialize
+        initChart();
+        connectWS();
+        console.log("%cQUIMERIA Sovereign Market Kernel — Clean Terminal", "color:#2563eb; font-weight:500");
+    </script>
+</body>
+</html><!DOCTYPE html>
+<html lang="en">
+<head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>QUIMERIA / SMK</title>
