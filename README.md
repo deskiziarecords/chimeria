@@ -105,6 +105,8 @@ The requested module, spearman_lag_engine.py, is an integral component of the In
 The requested module, signal_fusion_kernel.py, is the primary synthesis engine of the Sovereign Market Kernel. It functions as the Unified Master Equation (Source,), responsible for aggregating disparate signals from the IPDA Compiler (L1), the SOS-27-X Sentinel (L2), and various causal sensors.
 This engine solves the Signal Confidence Paradox (Source) by applying Bayesian Model Averaging and Kalman filtering to identify the market's "True Sincerity" while discarding "Liar States." It utilizes the specific institutional temporal decay constant e−0.08τ (Source,) to ensure that lagging causal signals are properly dampened relative to real-time price delivery.
 
+### order_flow_visibility_engine.py
+The requested module, order_flow_visibility_engine.py, provides "X-ray vision" into market microstructure, transitioning from a standard closed-box candlestick view to a granular map of buyer-seller aggression. This engine implements the Layer 2: Memory and Layer 4: Collector logic from the Sovereign Market Kernel, specifically focusing on Order Flow Imbalance (OFI), Tick Velocity Bursts, and Absorption Detection. It identifies institutional "pulses" and hidden inventory accumulation within Dark Pools before price displacement occurs.
 
 -----------------------------------------------------------------
 
