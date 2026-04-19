@@ -173,6 +173,60 @@ input[type=file]{display:none}
       </div>
     </div>
 
+
+    <!-- SETTINGS MODAL -->
+    <div class="modal-bg" id="cfg-modal">
+      <div class="modal" style="max-width:560px">
+        <h2>MODULE SETTINGS</h2>
+        <div style="font-size:9px;color:var(--t3);margin-bottom:10px">
+          Toggle modules on/off. Disabled modules use numpy fallback logic.
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px;margin-bottom:12px" id="mod-toggles"></div>
+        <div style="border-top:1px solid var(--b1);padding-top:10px;margin-top:4px">
+          <div style="font-size:9px;color:var(--t3);margin-bottom:8px">PLAYBACK SETTINGS</div>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <div>
+              <div style="font-size:8px;color:var(--t4);margin-bottom:3px">DEFAULT SPEED</div>
+              <select class="sel" id="cfg-speed" style="font-size:10px;padding:3px 6px">
+                <option value="500">1x  (500ms)</option>
+                <option value="300">2x  (300ms)</option>
+                <option value="150">3x  (150ms)</option>
+                <option value="80">5x   (80ms)</option>
+                <option value="50">10x  (50ms)</option>
+                <option value="16">MAX  (16ms)</option>
+              </select>
+            </div>
+            <div>
+              <div style="font-size:8px;color:var(--t4);margin-bottom:3px">LOOKBACK WINDOW</div>
+              <select class="sel" id="cfg-window" style="font-size:10px;padding:3px 6px">
+                <option value="30">30 bars</option>
+                <option value="60" selected>60 bars</option>
+                <option value="100">100 bars</option>
+                <option value="200">200 bars</option>
+              </select>
+            </div>
+            <div>
+              <div style="font-size:8px;color:var(--t4);margin-bottom:3px">DR LINES</div>
+              <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:9px">
+                <input type="checkbox" id="cfg-drlines" checked> Show DR/EQ lines
+              </label>
+            </div>
+            <div>
+              <div style="font-size:8px;color:var(--t4);margin-bottom:3px">TRADE LINES</div>
+              <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:9px">
+                <input type="checkbox" id="cfg-tradelines" checked> Show entry lines
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="mbtns">
+          <button class="btn btn-g" onclick="applySettings()">APPLY</button>
+          <button class="btn" onclick="closeModal('cfg-modal')">CLOSE</button>
+          <button class="btn" onclick="resetSettings()" style="margin-left:auto">RESET DEFAULTS</button>
+        </div>
+      </div>
+    </div>
+
     <!-- LEFT -->
     <div class="lp">
       <div class="phdr">LAMBDA SENSORS</div>
@@ -336,6 +390,7 @@ input[type=file]{display:none}
 
   <div class="ctrl">
     <button class="btn" id="btn-src">DATA SOURCE</button>
+    <button class="btn" id="btn-cfg" onclick="openModal('cfg-modal')">⚙ SETTINGS</button>
     <label class="btn" for="csv-in">CSV</label>
     <input type="file" id="csv-in" accept=".csv,.txt">
     <button class="btn" id="btn-demo">SAMPLE</button>
@@ -470,23 +525,37 @@ function updateTradeUI(){
 
 // WS
 let ws=null;
-function connectWS(){
-  if(ws){ws.close();ws=null;}
+function connectWS(cb){
+  // Only create a new connection if not already open/connecting
+  if(ws && (ws.readyState===WebSocket.OPEN||ws.readyState===WebSocket.CONNECTING)){
+    if(cb) cb(); return;
+  }
+  if(ws){ws.onclose=null;ws.onerror=null;ws.onmessage=null;ws.close();}
   ws=new WebSocket(`${WS_BASE}/ws/stream`);
-  ws.onopen=()=>setPill('conn-pill','WS:LIVE','#237a45');
-  ws.onclose=()=>setPill('conn-pill','WS:DISC','var(--t4)');
+  ws.onopen=()=>{
+    setPill('conn-pill','WS:LIVE','#237a45');
+    if(cb) cb();
+  };
+  ws.onclose=()=>{
+    setPill('conn-pill','WS:DISC','var(--t4)');
+    ws=null;
+    setRunning(false);
+  };
   ws.onerror=()=>setPill('conn-pill','WS:ERR','var(--alert)');
   ws.onmessage=e=>{
     const m=JSON.parse(e.data);
     if(m.type==='bar')handleBar(m.data);
     if(m.type==='done'){setRunning(false);addLog('ev','ok','[DONE] BACKTEST COMPLETE');}
     if(m.type==='stopped')setRunning(false);
-    if(m.type==='reset')resetLocal();
+    if(m.type==='reset'){addLog('ev','info','[RESET] cursor reset');}
   };
 }
 function wsSend(o){
-  if(!ws||ws.readyState!==WebSocket.OPEN){connectWS();setTimeout(()=>ws?.readyState===WebSocket.OPEN&&ws.send(JSON.stringify(o)),500);}
-  else ws.send(JSON.stringify(o));
+  if(!ws||ws.readyState!==WebSocket.OPEN){
+    connectWS(()=>ws.send(JSON.stringify(o)));
+  } else {
+    ws.send(JSON.stringify(o));
+  }
 }
 function setPill(id,txt,color){const el=document.getElementById(id);if(!el)return;el.textContent=txt;el.style.borderColor=color;el.style.color=color;}
 
@@ -500,6 +569,19 @@ async function apiLoad(path,body){
 let totalBars=0;
 function handleBar(d){
   const bar=d.bar;
+  // Normalize time to plain UTC unix seconds (LWC requires a number, not object/string)
+  if(typeof bar.time === 'object' && bar.time !== null){
+    // Could be {year,month,day} business-day object — convert to epoch via Date
+    if(bar.time.year !== undefined){
+      bar.time = Math.floor(Date.UTC(bar.time.year, (bar.time.month||1)-1, bar.time.day||1) / 1000);
+    } else {
+      bar.time = Math.floor(Date.now() / 1000);
+    }
+  } else if(typeof bar.time === 'string'){
+    bar.time = Math.floor(new Date(bar.time).getTime() / 1000);
+  } else {
+    bar.time = parseInt(bar.time) || Math.floor(Date.now() / 1000);
+  }
   lastPrice=bar.close;
   document.getElementById('trade-price').value=bar.close.toFixed(5);
   candles.update({time:bar.time,open:bar.open,high:bar.high,low:bar.low,close:bar.close});
@@ -638,7 +720,10 @@ function addLog(panel,cls,msg){
 
 // CONTROLS
 let running=false;
-document.getElementById('btn-run').addEventListener('click',()=>{connectWS();setTimeout(()=>{setRunning(true);wsSend({action:'run',speed:parseInt(document.getElementById('spd').value)});},200);});
+document.getElementById('btn-run').addEventListener('click',()=>{
+  setRunning(true);
+  wsSend({action:'run',speed:parseInt(document.getElementById('spd').value)});
+});
 document.getElementById('btn-stop').addEventListener('click',()=>{setRunning(false);wsSend({action:'stop'});});
 document.getElementById('btn-step').addEventListener('click',()=>{if(!ws||ws.readyState!==WebSocket.OPEN)connectWS();setTimeout(()=>wsSend({action:'step'}),ws?.readyState===WebSocket.OPEN?0:300);});
 document.getElementById('btn-reset').addEventListener('click',()=>{setRunning(false);wsSend({action:'reset'});resetLocal();});
@@ -702,8 +787,97 @@ function onDataLoaded(r){
   document.getElementById('flbl').textContent=r.source+' ('+r.count+' bars)';
   document.getElementById('src-pill').textContent='SRC:'+r.source.split(':')[0];
   addLog('ev','ok','[LOAD] '+r.count+' bars — '+r.source);
-  wsSend({action:'reset'});connectWS();
+  resetLocal();          // clear chart locally
+  connectWS();           // ensure WS open — do NOT send reset to server (cursor stays at 0 after load_bars)
 }
+
+
+// ── MODULE SETTINGS ──────────────────────────────────────────────────────────
+const MODULE_DEFS = [
+  {id:'bias',        name:'Bias Detector',       layer:'L1'},
+  {id:'ipda',        name:'IPDA Phase Detector',  layer:'L1'},
+  {id:'dealing',     name:'Dealing Range',         layer:'L1'},
+  {id:'eq_cross',    name:'Equilibrium Cross',     layer:'L1'},
+  {id:'swing',       name:'Swing Detector',        layer:'L1'},
+  {id:'session',     name:'Session / Killzone',    layer:'L1'},
+  {id:'vol_decay',   name:'Vol Decay λ1',          layer:'λ'},
+  {id:'displacement',name:'Displacement λ6',       layer:'λ'},
+  {id:'harmonic',    name:'Harmonic Trap λ3',      layer:'λ'},
+  {id:'expansion',   name:'Expansion Predictor',   layer:'λ'},
+  {id:'manipulation',name:'Manipulation λ4',       layer:'λ'},
+  {id:'fvg',         name:'FVG Detector',          layer:'L2'},
+  {id:'ob',          name:'Order Block',           layer:'L2'},
+  {id:'vol_profile', name:'Volume Profile',        layer:'L2'},
+  {id:'kl',          name:'KL Divergence',         layer:'L4'},
+  {id:'fusion',      name:'Lambda Fusion Ring0',   layer:'L4'},
+  {id:'mandra',      name:'Mandra Gate',           layer:'L4'},
+  {id:'topology',    name:'Topology Fracture',     layer:'L4'},
+];
+
+let moduleStates = {};
+MODULE_DEFS.forEach(m => moduleStates[m.id] = true);
+
+const LAYER_COLORS = {'L1':'#237a45','λ':'#d96000','L2':'#555','L4':'#aa2828'};
+
+function buildModuleToggles(){
+  const c = document.getElementById('mod-toggles');
+  if(!c) return;
+  c.innerHTML = '';
+  MODULE_DEFS.forEach(m => {
+    const on = moduleStates[m.id];
+    const col = LAYER_COLORS[m.layer] || '#888';
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:7px;padding:5px 8px;border:1px solid var(--b1);background:var(--bg1);cursor:pointer';
+    row.id = 'modrow-' + m.id;
+    row.innerHTML = `
+      <div style="width:8px;height:8px;border-radius:50%;background:${on?col:'var(--b3)'};transition:background .2s;flex-shrink:0" id="moddot-${m.id}"></div>
+      <span style="font-size:8px;padding:1px 5px;border:1px solid ${col};color:${col}">${m.layer}</span>
+      <span style="font-size:10px;color:${on?'var(--t1)':'var(--t4)'};flex:1" id="modlbl-${m.id}">${m.name}</span>
+      <span style="font-size:9px;color:${on?'var(--up)':'var(--down)'}" id="modsts-${m.id}">${on?'ON':'OFF'}</span>`;
+    row.onclick = () => toggleModule(m.id);
+    c.appendChild(row);
+  });
+}
+
+function toggleModule(id){
+  moduleStates[id] = !moduleStates[id];
+  const on = moduleStates[id];
+  const m = MODULE_DEFS.find(x=>x.id===id);
+  const col = LAYER_COLORS[m?.layer||'L1'];
+  const dot = document.getElementById('moddot-'+id);
+  const lbl = document.getElementById('modlbl-'+id);
+  const sts = document.getElementById('modsts-'+id);
+  if(dot) dot.style.background = on ? col : 'var(--b3)';
+  if(lbl) lbl.style.color = on ? 'var(--t1)' : 'var(--t4)';
+  if(sts){ sts.textContent = on?'ON':'OFF'; sts.style.color = on?'var(--up)':'var(--down)';}
+}
+
+function applySettings(){
+  // Sync speed selector
+  const spd = document.getElementById('cfg-speed').value;
+  const mainSpd = document.getElementById('spd');
+  if(mainSpd) mainSpd.value = spd;
+  // Send module config to backend
+  const disabled = MODULE_DEFS.filter(m=>!moduleStates[m.id]).map(m=>m.id);
+  fetch(API_BASE+'/api/config/modules', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({disabled_modules: disabled})
+  }).catch(()=>{}); // non-fatal if endpoint not up yet
+  addLog('ev','info','[CFG] Settings applied — '+disabled.length+' modules disabled');
+  closeModal('cfg-modal');
+}
+
+function resetSettings(){
+  MODULE_DEFS.forEach(m => { moduleStates[m.id] = true; });
+  buildModuleToggles();
+}
+
+document.getElementById('btn-cfg')?.addEventListener('click', ()=>{
+  buildModuleToggles();
+  openModal('cfg-modal');
+});
+
 
 // BOOT
 initChart();connectWS();
