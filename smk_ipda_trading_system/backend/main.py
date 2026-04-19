@@ -113,6 +113,25 @@ def ping():
             "pipeline_error": _pipeline_error}
 
 # ── WEBSOCKET ─────────────────────────────────────────────────────────────────
+
+class ModuleConfig(BaseModel):
+    disabled_modules: list = []
+
+@app.post("/api/config/modules")
+def config_modules(payload: ModuleConfig):
+    p = get_pipeline()
+    disabled = set(payload.disabled_modules)
+    for key in list(p.modules.keys()):
+        if key in disabled:
+            if p.modules[key] is not None:
+                p.modules[f"_disabled_{key}"] = p.modules[key]
+                p.modules[key] = None
+        else:
+            if p.modules.get(key) is None and f"_disabled_{key}" in p.modules:
+                p.modules[key] = p.modules.pop(f"_disabled_{key}")
+    enabled = [k for k,v in p.modules.items() if v is not None and not k.startswith('_')]
+    return {"status": "ok", "enabled": enabled, "disabled": list(disabled)}
+
 @app.websocket("/ws/stream")
 async def stream(ws: WebSocket):
     await ws.accept()
@@ -123,7 +142,6 @@ async def stream(ws: WebSocket):
         await ws.close()
         return
 
-    p.reset_cursor()
     p.running = False
     run_task: Optional[asyncio.Task] = None
 
