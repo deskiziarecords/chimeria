@@ -6,6 +6,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 import uvicorn, asyncio, json, os, traceback
+import numpy as np
+
+class _SafeEncoder(json.JSONEncoder):
+    """Converts numpy types to Python natives so send_json never crashes."""
+    def default(self, obj):
+        if isinstance(obj, np.integer):   return int(obj)
+        if isinstance(obj, np.floating):  return float(obj)
+        if isinstance(obj, np.bool_):     return bool(obj)
+        if isinstance(obj, np.ndarray):   return obj.tolist()
+        return super().default(obj)
+
+def _safe_dumps(data):
+    return _SafeEncoder(separators=(',',':')).encode(data)
 from typing import Optional
 from pydantic import BaseModel
 
@@ -153,11 +166,11 @@ async def stream(ws: WebSocket):
                     None, p.step          # run step() in thread so it can't block loop
                 )
                 if result is None:
-                    await ws.send_json({"type": "done"})
+                    await ws.send_text(_safe_dumps({"type": "done"}))
                     p.running = False
                     break
                 try:
-                    await ws.send_json({"type": "bar", "data": result})
+                    await ws.send_text(_safe_dumps({"type": "bar", "data": result}))
                 except Exception:
                     p.running = False
                     break
@@ -206,8 +219,8 @@ async def stream(ws: WebSocket):
                     except asyncio.CancelledError:
                         pass
                 result = await asyncio.get_event_loop().run_in_executor(None, p.step)
-                await ws.send_json({"type": "bar", "data": result}
-                                   if result else {"type": "done"})
+                await ws.send_text(_safe_dumps({"type": "bar", "data": result}
+                                   if result else {"type": "done"}))
 
             elif action == "stop":
                 p.running = False
@@ -217,7 +230,7 @@ async def stream(ws: WebSocket):
                         await run_task
                     except asyncio.CancelledError:
                         pass
-                await ws.send_json({"type": "stopped"})
+                await ws.send_text(_safe_dumps({"type": "stopped"}))
 
             elif action == "reset":
                 p.running = False
@@ -228,7 +241,7 @@ async def stream(ws: WebSocket):
                     except asyncio.CancelledError:
                         pass
                 p.reset_cursor()
-                await ws.send_json({"type": "reset"})
+                await ws.send_text(_safe_dumps({"type": "reset"}))
 
     except WebSocketDisconnect:
         p.running = False
