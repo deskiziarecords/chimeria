@@ -40,15 +40,43 @@ async def _err(request: Request, exc: Exception):
         content={"detail": str(exc)},
         headers={"Access-Control-Allow-Origin": "*"})
 
-_here = os.path.dirname(os.path.abspath(__file__))
-FRONTEND = os.path.normpath(os.path.join(_here, "..", "frontend"))
+# Resolve frontend path — try multiple locations
+def _find_frontend():
+    candidates = [
+        # Relative to this file
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend"),
+        # Relative to CWD
+        os.path.join(os.getcwd(), "frontend"),
+        os.path.join(os.getcwd(), "..", "frontend"),
+        # Absolute common paths
+        os.path.expanduser("~/chimeria/smk_ipda_trading_system/frontend"),
+        os.path.expanduser("~/Documents/chimeria/smk_ipda_trading_system/frontend"),
+    ]
+    for c in candidates:
+        c = os.path.normpath(c)
+        if os.path.isfile(os.path.join(c, "index.html")):
+            print(f"[FRONTEND] Found at: {c}")
+            return c
+    print("[FRONTEND] WARNING: index.html not found in any candidate path")
+    print("[FRONTEND] Candidates tried:", candidates)
+    return os.path.normpath(candidates[0])
+
+FRONTEND = _find_frontend()
+
 if os.path.isdir(FRONTEND):
     app.mount("/static", StaticFiles(directory=FRONTEND), name="static")
 
 @app.get("/")
 def root():
     idx = os.path.join(FRONTEND, "index.html")
-    return FileResponse(idx) if os.path.exists(idx) else {"status": "SMK API running"}
+    if os.path.exists(idx):
+        return FileResponse(idx)
+    return {
+        "status": "SMK API running — frontend not found",
+        "frontend_path_tried": FRONTEND,
+        "cwd": os.getcwd(),
+        "tip": "Run uvicorn from the backend/ directory, or set FRONTEND_DIR env var"
+    }
 
 # ── PIPELINE ──────────────────────────────────────────────────────────────────
 _pipeline = None
@@ -248,3 +276,52 @@ async def stream(ws: WebSocket):
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
+# ── LIVE FEED ──────────────────────────────────────────────────────────────────
+from realtime import live_feed
+
+class LivePayload(BaseModel):
+    api_key:     str = ""
+    symbol:      str = "EURUSDT"
+    granularity: str = "1m"
+
+@app.post("/api/live/start")
+async def live_start(payload: LivePayload):
+    p = get_pipeline()
+    live_feed.configure(payload.symbol, payload.granularity, payload.api_key, p)
+    live_feed.start(p)
+    return {"status": "ok", "symbol": payload.symbol, "granularity": payload.granularity}
+
+@app.post("/api/live/stop")
+async def live_stop():
+    live_feed.stop()
+    return {"status": "stopped"}
+
+@app.get("/api/live/status")
+def live_status():
+    return {
+        "running":     live_feed.running,
+        "symbol":      live_feed.symbol,
+        "granularity": live_feed.granularity,
+        "clients":     len(live_feed.clients),
+        "last_ts":     live_feed.last_ts,
+    }
+
+@app.websocket("/ws/live")
+async def live_stream(ws):
+    from fastapi import WebSocket
+    await ws.accept()
+    live_feed.add_client(ws)
+    try:
+        # Keep alive — client sends pings
+        while True:
+            try:
+                msg = await asyncio.wait_for(ws.receive_text(), timeout=30)
+                if msg == "ping":
+                    await ws.send_text('{"type":"pong"}')
+            except asyncio.TimeoutError:
+                await ws.send_text('{"type":"ping"}')
+            except Exception:
+                break
+    finally:
+        live_feed.remove_client(ws)
