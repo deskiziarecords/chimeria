@@ -25,6 +25,7 @@ html,body{height:100%;background:var(--bg);color:var(--t1);font-family:'Courier 
 .p-off{border-color:var(--b2);color:var(--t3)}
 .tb-r{margin-left:auto;color:var(--t3);font-size:9px;display:flex;align-items:center;gap:10px;font-weight:500}
 .dot{width:5px;height:5px;border-radius:50%;background:var(--alert);animation:pulse 1s ease-in-out infinite;display:none}
+.live-dot{width:8px;height:8px;border-radius:50%;background:var(--up);animation:pulse .8s ease-in-out infinite;display:none;flex-shrink:0}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.1}}
 @keyframes pulse{0%,100%{opacity:.2;transform:scale(.7)}50%{opacity:1;transform:scale(1)}}
 .main{display:flex;flex:1;overflow:hidden;position:relative}
@@ -154,6 +155,35 @@ input[type=file]{display:none}
   </div>
 
   <div class="main">
+
+
+    <!-- LIVE MODAL -->
+    <div class="modal-bg" id="live-modal">
+      <div class="modal" style="max-width:400px">
+        <h2 style="color:var(--up)">◉ LIVE FEED — BITGET</h2>
+        <div style="font-size:9px;color:var(--t3);margin-bottom:10px">
+          Connects to Bitget REST, polls every 5s for new closed candles, runs full SMK pipeline in real-time.
+          API key optional — public market data works without auth.
+        </div>
+        <div class="mrow"><label>SYMBOL</label><input id="live-sym" value="EURUSDT" placeholder="e.g. EURUSDT, BTCUSDT"/></div>
+        <div class="mrow"><label>TIMEFRAME</label>
+          <select id="live-tf" class="sel" style="font-size:10px;padding:3px 6px;width:100%">
+            <option value="1m">1 minute</option>
+            <option value="3m">3 minutes</option>
+            <option value="5m" selected>5 minutes</option>
+            <option value="15m">15 minutes</option>
+            <option value="1h">1 hour</option>
+          </select>
+        </div>
+        <div class="mrow"><label>API KEY (optional)</label><input id="live-key" type="password" placeholder="Leave blank for public data"/></div>
+        <div id="live-status-box" style="padding:6px 8px;background:var(--bg2);border:1px solid var(--b1);font-size:9px;color:var(--t3);margin-bottom:8px;display:none"></div>
+        <div class="mbtns">
+          <button class="btn" id="live-start-btn" style="border-color:var(--up);color:var(--up);font-weight:700" onclick="startLive()">▶ START LIVE</button>
+          <button class="btn btn-r" id="live-stop-btn" onclick="stopLive()" style="display:none">■ STOP</button>
+          <button class="btn" onclick="closeModal('live-modal')">CLOSE</button>
+        </div>
+      </div>
+    </div>
 
     <!-- SRC MODAL -->
     <div class="modal-bg" id="src-modal">
@@ -433,6 +463,8 @@ input[type=file]{display:none}
   <div class="ctrl">
     <button class="btn" id="btn-src">DATA SOURCE</button>
     <button class="btn" id="btn-cfg" onclick="openModal('cfg-modal')">⚙ SETTINGS</button>
+    <button class="btn" id="btn-live" onclick="openModal('live-modal')" style="border-color:var(--up);color:var(--up);font-weight:700">◉ LIVE</button>
+    <div id="live-dot" class="live-dot"></div>
     <label class="btn" for="csv-in">CSV</label>
     <input type="file" id="csv-in" accept=".csv,.txt">
     <button class="btn" id="btn-demo">SAMPLE</button>
@@ -518,6 +550,7 @@ function openTrade(side){
     tradePriceLines[id]=candles.createPriceLine({price:lastPrice,color:side==='buy'?'#237a4566':'#aa282866',lineWidth:1,lineStyle:0,axisLabelVisible:true,title:`T${id} ${side.toUpperCase()}`});
   }catch{}
   // ── TRADE SIGNAL BUTTONS ────────────────────────────────────────────────
+  detectAndPaintReversal(d);
   updateTradeSignals(d);
   updateTradeUI();
 }
@@ -903,6 +936,9 @@ function resetLocal(){
   if(btnCa) btnCa.classList.remove('close-signal');
   const sp = document.getElementById('trade-signal-pill');
   if(sp) sp.style.display='none';
+  reversalMarkers = [];
+  paintedCandles = {};
+  try { if(candles) candles.setMarkers([]); } catch(e){}
 
   candles.setData([]);volSeries.setData([]);rmLines();
   Object.keys(tradePriceLines).forEach(id=>{try{candles.removePriceLine(tradePriceLines[id]);}catch{}});
@@ -1066,6 +1102,191 @@ document.getElementById('btn-cfg')?.addEventListener('click', ()=>{
   buildModuleToggles();
   openModal('cfg-modal');
 });
+
+
+
+// ── LIVE FEED ─────────────────────────────────────────────────────────────────
+let liveWs = null;
+let liveRunning = false;
+
+// Candle marker series for reversal painting
+let reversalMarkers = [];
+
+function updateCandleMarkers() {
+  if (!candles) return;
+  try {
+    candles.setMarkers(reversalMarkers);
+  } catch(e) {}
+}
+
+function addReversalMarker(time, type, text) {
+  // type: 'bullish_reversal' | 'bearish_reversal' | 'manipulation' | 'close_signal'
+  const configs = {
+    bullish_reversal: { position:'belowBar', color:'#1a6335', shape:'arrowUp',   text: text || '▲ REV' },
+    bearish_reversal: { position:'aboveBar', color:'#8f1f1f', shape:'arrowDown', text: text || '▼ REV' },
+    manipulation:     { position:'aboveBar', color:'#c05000', shape:'circle',    text: text || 'JUDAS' },
+    distribution:     { position:'belowBar', color:'#4488ff', shape:'arrowUp',   text: text || '▲ DIS' },
+    close_signal:     { position:'aboveBar', color:'#c05000', shape:'square',    text: text || '◆ CLOSE' },
+    amd_reset:        { position:'aboveBar', color:'#888',    shape:'circle',    text: text || 'RESET' },
+  };
+  const cfg = configs[type] || configs.bullish_reversal;
+  // Remove duplicate at same time
+  reversalMarkers = reversalMarkers.filter(m => m.time !== time);
+  reversalMarkers.push({ time, ...cfg });
+  reversalMarkers.sort((a,b) => a.time - b.time);
+  // Keep last 200
+  if (reversalMarkers.length > 200) reversalMarkers = reversalMarkers.slice(-200);
+  updateCandleMarkers();
+}
+
+// Candle color override for painted candles
+let paintedCandles = {}; // time -> color
+
+function paintCandle(bar, color) {
+  // We'll use markers as the visual indicator since LWC doesn't support
+  // per-candle color overrides easily in v4 without a custom series
+  // So we use colored markers + a separate line series for strong signals
+  paintedCandles[bar.time] = color;
+}
+
+function detectAndPaintReversal(d) {
+  if (!d || !d.bar) return;
+  const bar  = d.bar;
+  const amd  = d.amd?.state;
+  const prev = d.amd?.prev;
+  const veto = d.veto?.decision;
+  const pFused  = d.fusion?.p_fused || 0;
+  const manip   = d.manipulation?.active;
+  const inverted= d.harmonic?.inverted;
+  const fracture= d.topology?.fractured;
+  const entrapped = d.vol_decay?.entrapped;
+  const stasis  = d.vol_decay?.stasis || 0;
+  const bias    = d.bias?.bias;
+  const kl_bad  = !d.kl?.stable;
+  const R_MASTER= d.amd?.R_MASTER;
+
+  // ── REVERSE CYCLE DETECTION ───────────────────────────────────────────────
+  // 1. AMD phase transition = potential reversal
+  if (d.amd?.changed) {
+    if (prev === 'Manipulation' && amd === 'Distribution') {
+      // Judas sweep complete → Distribution begins → BUY signal
+      addReversalMarker(bar.time, 'bullish_reversal', `▲ DIST ${pFused > 0 ? '+' : ''}${(pFused*100).toFixed(0)}%`);
+      addLog('ev', 'ok', `[${String(d.bar_index).padStart(4,'0')}] ▲ REVERSAL: MAN→DIS @ ${bar.close.toFixed(5)}`);
+    }
+    if (prev === 'Distribution' && amd === 'Retracement') {
+      // Distribution ending → SELL / close longs
+      addReversalMarker(bar.time, 'bearish_reversal', `▼ RETR`);
+      addLog('ev', 'warn', `[${String(d.bar_index).padStart(4,'0')}] ▼ REVERSAL: DIS→RET @ ${bar.close.toFixed(5)}`);
+    }
+    if (R_MASTER) {
+      addReversalMarker(bar.time, 'amd_reset', 'R_MASTER');
+    }
+  }
+
+  // 2. Judas swing = manipulation marker
+  if (manip) {
+    addReversalMarker(bar.time, 'manipulation', `JUDAS`);
+  }
+
+  // 3. Phase entrapment critical mass → expansion imminent
+  if (entrapped && stasis > 8 && stasis % 3 === 0) {
+    const dir = bias === 'BULLISH' ? 'bullish_reversal' : 'bearish_reversal';
+    addReversalMarker(bar.time, dir, `λ1 E=${(d.vol_decay?.energy||0).toFixed(0)}`);
+  }
+
+  // 4. Strong fusion signal = actionable
+  if (veto === 'Proceed' && Math.abs(pFused) > 0.55) {
+    const type = pFused > 0 ? 'distribution' : 'bearish_reversal';
+    addReversalMarker(bar.time, type, `p=${pFused > 0 ? '+' : ''}${pFused.toFixed(2)}`);
+  }
+
+  // 5. Regime fracture = danger / close
+  if ((fracture || kl_bad) && veto === 'Halt') {
+    addReversalMarker(bar.time, 'close_signal', `HALT`);
+  }
+}
+
+async function startLive() {
+  const sym  = document.getElementById('live-sym').value.trim() || 'EURUSDT';
+  const tf   = document.getElementById('live-tf').value;
+  const key  = document.getElementById('live-key').value.trim();
+
+  setLiveStatus('Connecting to Bitget...', '#888');
+
+  try {
+    const r = await apiLoad('../live/start', {api_key: key, symbol: sym, granularity: tf});
+    if (r.status !== 'ok') throw new Error(r.message || 'Start failed');
+
+    // Connect to live WebSocket
+    if (liveWs) { try { liveWs.close(); } catch(e){} }
+    const wsUrl = WS_BASE + '/ws/live';
+    liveWs = new WebSocket(wsUrl);
+
+    liveWs.onopen = () => {
+      liveRunning = true;
+      setLiveStatus(`LIVE: ${sym} ${tf.toUpperCase()} — polling every 5s`, 'var(--up)');
+      document.getElementById('live-start-btn').style.display = 'none';
+      document.getElementById('live-stop-btn').style.display  = '';
+      document.getElementById('live-dot').style.display = '';
+      document.getElementById('btn-live').textContent = '◉ LIVE';
+      document.getElementById('btn-live').style.color = 'var(--up)';
+      document.getElementById('src-pill').textContent = 'LIVE:' + sym;
+      document.getElementById('src-pill').style.borderColor = 'var(--up)';
+      document.getElementById('src-pill').style.color = 'var(--up)';
+      addLog('ev', 'ok', `[LIVE] Connected: ${sym} ${tf}`);
+      // Ping loop
+      liveWs._pingTimer = setInterval(() => {
+        if (liveWs?.readyState === WebSocket.OPEN) liveWs.send('ping');
+      }, 20000);
+    };
+
+    liveWs.onmessage = e => {
+      const m = JSON.parse(e.data);
+      if (m.type === 'bar') {
+        handleBar(m.data);
+        detectAndPaintReversal(m.data);
+      }
+      if (m.type === 'error') addLog('ev', 'alert', '[LIVE] ' + m.message);
+    };
+
+    liveWs.onclose = () => {
+      liveRunning = false;
+      clearInterval(liveWs?._pingTimer);
+      setLiveStatus('Disconnected', 'var(--down)');
+      document.getElementById('live-dot').style.display = 'none';
+    };
+
+    liveWs.onerror = () => {
+      setLiveStatus('WebSocket error', 'var(--down)');
+    };
+
+  } catch(e) {
+    setLiveStatus('Error: ' + e.message, 'var(--down)');
+    addLog('ev', 'alert', '[LIVE] ' + e.message);
+  }
+}
+
+async function stopLive() {
+  try { await fetch(API_BASE + '/api/live/stop', {method:'POST'}); } catch(e) {}
+  if (liveWs) { try { liveWs.close(); } catch(e){} liveWs = null; }
+  liveRunning = false;
+  document.getElementById('live-start-btn').style.display = '';
+  document.getElementById('live-stop-btn').style.display  = 'none';
+  document.getElementById('live-dot').style.display = 'none';
+  document.getElementById('src-pill').textContent = 'LIVE:OFF';
+  document.getElementById('src-pill').style.borderColor = '';
+  document.getElementById('src-pill').style.color = '';
+  setLiveStatus('Stopped', 'var(--t3)');
+  addLog('ev', 'info', '[LIVE] Feed stopped');
+}
+
+function setLiveStatus(msg, color) {
+  const el = document.getElementById('live-status-box');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = color || 'var(--t3)';
+  el.style.display = '';
+}
 
 
 // BOOT
