@@ -74,7 +74,7 @@ mkdir -p "$PROJECT_ROOT/logs"
 
 echo ""
 echo "[4/4] Starting FastAPI server..."
-echo -e "${GREEN}       API will be available at: http://localhost:8000${NC}"
+echo -e "${GREEN}       API will be available at: http://localhost:80${NC}"
 echo -e "${GREEN}       Apache frontend should proxy /api to this${NC}"
 echo ""
 echo "       Logs: tail -f $PROJECT_ROOT/logs/backend.log"
@@ -85,7 +85,7 @@ echo ""
 cd "$BACKEND_DIR"
 exec python3 -m uvicorn main:app \
     --host 127.0.0.1 \
-    --port 8000 \
+    --port 80 \
     --workers 1 \
     --log-level info \
     --access-log \
