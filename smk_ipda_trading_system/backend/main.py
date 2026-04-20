@@ -80,7 +80,7 @@ class ModuleConfig(BaseModel):
 @app.post("/api/load/csv")
 async def load_csv(payload: CSVPayload):
     from data_connectors import load_csv_text
-    bars = load_csv_text(payload.text)
+    bars = load_csv_text(payload.text, source_hint=payload.source_hint or 'auto')
     if not bars:
         raise HTTPException(400, "CSV parse failed")
     get_pipeline().load_bars(bars)
@@ -247,4 +247,4 @@ async def stream(ws: WebSocket):
             except asyncio.CancelledError: pass
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="10.0.40.5", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
