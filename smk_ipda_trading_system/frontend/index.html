@@ -119,7 +119,7 @@ input[type=file]{display:none}
 .mrow input,.mrow select{background:var(--bg1);border:1px solid var(--b2);color:var(--t1);font-family:inherit;font-size:10px;padding:4px 7px;width:100%}
 .mrow input:focus{outline:none;border-color:var(--t2)}
 .mbtns{display:flex;gap:8px;margin-top:12px}
-.src-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.src-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px}
 .src-card{border:1px solid var(--b2);padding:8px 10px;cursor:pointer;background:var(--bg1)}
 .src-card:hover,.src-card.sel-src{border-color:var(--t2);background:var(--bg)}
 .src-card h3{font-size:9px;color:var(--t1);margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px}
@@ -149,11 +149,43 @@ input[type=file]{display:none}
     <div class="modal-bg" id="src-modal">
       <div class="modal">
         <h2>SELECT DATA SOURCE</h2>
+        <div style="font-size:9px;color:var(--t3);margin-bottom:8px;letter-spacing:.5px">SELECT SOURCE FORMAT</div>
         <div class="src-grid">
-          <div class="src-card" id="sc-csv"    onclick="pickSrc('csv')"><h3>CSV / LOCAL FILE</h3><p>MT4, TradingView, custom OHLCV exports</p><span class="tag">OFFLINE</span></div>
-          <div class="src-card" id="sc-bitget" onclick="pickSrc('bitget')"><h3>BITGET</h3><p>REST pull — any spot instrument</p><span class="tag live">LIVE/HIST</span></div>
-          <div class="src-card" id="sc-oanda"  onclick="pickSrc('oanda')"><h3>OANDA / OTX</h3><p>fxTrade or Practice v20 API</p><span class="tag live">LIVE/HIST</span></div>
-          <div class="src-card" id="sc-demo"   onclick="pickSrc('demo')"><h3>BUILT-IN SAMPLE</h3><p>Synthetic EURUSD 5M — full AMD cycle</p><span class="tag">DEMO</span></div>
+          <div class="src-card" id="sc-mt4"    onclick="pickSrc('mt4')">
+            <h3>METATRADER 4</h3>
+            <p>History Center export. &lt;DATE&gt;,&lt;TIME&gt;,&lt;OPEN&gt;... format</p>
+            <span class="tag">CSV OFFLINE</span>
+          </div>
+          <div class="src-card" id="sc-mt5"    onclick="pickSrc('mt5')">
+            <h3>METATRADER 5</h3>
+            <p>MT5 export. DATE,TIME,OPEN,HIGH,LOW,CLOSE,TICKVOL format</p>
+            <span class="tag">CSV OFFLINE</span>
+          </div>
+          <div class="src-card" id="sc-tv"     onclick="pickSrc('tv')">
+            <h3>TRADINGVIEW</h3>
+            <p>Download CSV from chart. ISO or US date format, auto-detected</p>
+            <span class="tag">CSV OFFLINE</span>
+          </div>
+          <div class="src-card" id="sc-csv"    onclick="pickSrc('csv')">
+            <h3>GENERIC CSV</h3>
+            <p>Dukascopy, custom OHLCV. Any delimiter, auto column detect</p>
+            <span class="tag">CSV OFFLINE</span>
+          </div>
+          <div class="src-card" id="sc-bitget" onclick="pickSrc('bitget')">
+            <h3>BITGET</h3>
+            <p>REST API — any spot pair, live or historical</p>
+            <span class="tag live">LIVE / HIST</span>
+          </div>
+          <div class="src-card" id="sc-oanda"  onclick="pickSrc('oanda')">
+            <h3>OANDA / OTX</h3>
+            <p>fxTrade or Practice v20 API bearer token</p>
+            <span class="tag live">LIVE / HIST</span>
+          </div>
+          <div class="src-card" id="sc-demo"   onclick="pickSrc('demo')">
+            <h3>BUILT-IN SAMPLE</h3>
+            <p>Synthetic EURUSD 5M with full AMD cycle embedded</p>
+            <span class="tag">DEMO</span>
+          </div>
         </div>
         <div id="api-fields" style="display:none">
           <div class="mrow"><label>API KEY / TOKEN</label><input id="f-key" type="password" placeholder="Key or bearer token..."/></div>
@@ -711,6 +743,13 @@ function handleBar(d){
 }
 
 // HELPERS
+function setPill(id, txt, color){
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.textContent = txt;
+  el.style.borderColor = color;
+  el.style.color = color;
+}
 function setText(id,val,color){const el=document.getElementById(id);if(!el)return;el.textContent=val??'--';if(color)el.style.color=color;}
 function setBadge(id,text,alert){const el=document.getElementById(id);if(!el)return;el.textContent=text;alert?el.classList.add('cb-alert'):el.classList.remove('cb-alert');}
 function showBadge(id,v,alert){const el=document.getElementById(id);if(!el)return;el.style.display=v?'':'none';alert&&v?el.classList.add('cb-alert'):el.classList.remove('cb-alert');}
@@ -767,15 +806,20 @@ function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
 function pickSrc(src){
   activeSrc=src;
-  ['csv','bitget','oanda','demo'].forEach(s=>document.getElementById('sc-'+s)?.classList.remove('sel-src'));
+  ['csv','mt4','mt5','tv','bitget','oanda','demo'].forEach(s=>
+    document.getElementById('sc-'+s)?.classList.remove('sel-src'));
   document.getElementById('sc-'+src)?.classList.add('sel-src');
   const af=document.getElementById('api-fields');
-  if(src==='bitget'||src==='oanda'){af.style.display='';
+  if(src==='bitget'||src==='oanda'){
+    af.style.display='';
     document.getElementById('f-secret-row').style.display=src==='bitget'?'':'none';
     document.getElementById('f-acct-row').style.display=src==='oanda'?'':'none';
     document.getElementById('f-sym').value=src==='oanda'?'EUR_USD':'EURUSDT';
-  }else af.style.display='none';
-  if(src==='csv')document.getElementById('csv-in').click();
+  } else {
+    af.style.display='none';
+  }
+  // CSV-based sources trigger file picker
+  if(['csv','mt4','mt5','tv'].includes(src)) document.getElementById('csv-in').click();
   if(src==='demo'){closeModal('src-modal');loadDemo();}
 }
 document.getElementById('src-confirm').addEventListener('click',async()=>{
@@ -789,8 +833,22 @@ document.getElementById('src-confirm').addEventListener('click',async()=>{
 });
 document.getElementById('csv-in').addEventListener('change',async function(){
   if(!this.files[0])return;
-  try{const r=await apiLoad('csv',{text:await this.files[0].text(),filename:this.files[0].name});onDataLoaded(r);closeModal('src-modal');}
-  catch(ex){addLog('ev','alert','[CSV] '+ex.message);}
+  // Map activeSrc to backend format hint
+  const hintMap = {mt4:'mt4', mt5:'mt5', tv:'tradingview', csv:'auto'};
+  const hint = hintMap[activeSrc] || 'auto';
+  const label = {mt4:'MT4', mt5:'MT5', tv:'TradingView', csv:'CSV'}[activeSrc] || 'CSV';
+  try{
+    const r = await apiLoad('csv', {
+      text: await this.files[0].text(),
+      filename: this.files[0].name,
+      source_hint: hint
+    });
+    r.source = label + ':' + this.files[0].name;
+    onDataLoaded(r);
+    closeModal('src-modal');
+  } catch(ex){
+    addLog('ev','alert','['+label+'] '+ex.message);
+  }
 });
 async function loadDemo(){
   try{const r=await apiLoad('sample',{});onDataLoaded(r);addLog('ev','info','[SRC] EURUSD 5M synthetic AMD cycle');}
