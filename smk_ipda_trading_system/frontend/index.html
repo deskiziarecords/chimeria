@@ -87,10 +87,19 @@ html,body{height:100%;background:var(--bg);color:var(--t1);font-family:'Courier 
 .t-input{background:var(--bg);border:1px solid var(--b2);color:var(--t1);font-family:inherit;font-size:10px;padding:3px 6px;width:100%;text-align:right;margin-bottom:5px}
 .t-input:focus{outline:none;border-color:var(--t2)}
 .trade-row{display:flex;gap:4px;margin-bottom:4px}
-.btn-buy{flex:1;padding:6px 0;border:1px solid var(--up);background:var(--up-bg);color:var(--up);font-family:inherit;font-size:10px;cursor:pointer;font-weight:bold;letter-spacing:1px}
+.btn-buy{flex:1;padding:6px 0;border:1px solid var(--up);background:var(--up-bg);color:var(--up);font-family:inherit;font-size:10px;cursor:pointer;font-weight:bold;letter-spacing:1px;transition:all .3s}
 .btn-buy:hover{background:var(--up);color:#fff}
-.btn-sell{flex:1;padding:6px 0;border:1px solid var(--down);background:var(--down-bg);color:var(--down);font-family:inherit;font-size:10px;cursor:pointer;font-weight:bold;letter-spacing:1px}
+.btn-buy.signal-active{background:var(--up);color:#fff;border-color:var(--up);box-shadow:0 0 0 3px #1a633540,0 0 16px #1a633530;animation:signal-pulse-up 1.2s ease-in-out infinite}
+.btn-sell{flex:1;padding:6px 0;border:1px solid var(--down);background:var(--down-bg);color:var(--down);font-family:inherit;font-size:10px;cursor:pointer;font-weight:bold;letter-spacing:1px;transition:all .3s}
 .btn-sell:hover{background:var(--down);color:#fff}
+.btn-sell.signal-active{background:var(--down);color:#fff;border-color:var(--down);box-shadow:0 0 0 3px #8f1f1f40,0 0 16px #8f1f1f30;animation:signal-pulse-dn 1.2s ease-in-out infinite}
+.btn-ca{width:100%;padding:3px 0;border:1px solid var(--b2);background:var(--bg2);color:var(--t3);font-family:inherit;font-size:9px;cursor:pointer;letter-spacing:.5px;transition:all .3s}
+.btn-ca:hover{border-color:var(--alert);color:var(--alert)}
+.btn-ca.close-signal{border-color:var(--alert);color:var(--alert);background:var(--alert-bg);box-shadow:0 0 0 3px #c0500030,0 0 14px #c0500025;animation:signal-pulse-alert 1s ease-in-out infinite;font-weight:700}
+.pcls.close-signal{border-color:var(--alert)!important;color:var(--alert)!important;background:var(--alert-bg);box-shadow:0 0 0 2px #c0500030;animation:signal-pulse-alert 1s ease-in-out infinite}
+@keyframes signal-pulse-up{0%,100%{box-shadow:0 0 0 3px #1a633540,0 0 16px #1a633530}50%{box-shadow:0 0 0 5px #1a633560,0 0 24px #1a633550}}
+@keyframes signal-pulse-dn{0%,100%{box-shadow:0 0 0 3px #8f1f1f40,0 0 16px #8f1f1f30}50%{box-shadow:0 0 0 5px #8f1f1f60,0 0 24px #8f1f1f50}}
+@keyframes signal-pulse-alert{0%,100%{box-shadow:0 0 0 2px #c0500030,0 0 12px #c0500020}50%{box-shadow:0 0 0 4px #c0500055,0 0 20px #c0500045}}
 .btn-ca{width:100%;padding:3px 0;border:1px solid var(--b2);background:var(--bg2);color:var(--t3);font-family:inherit;font-size:9px;cursor:pointer;letter-spacing:.5px}
 .btn-ca:hover{border-color:var(--alert);color:var(--alert)}
 /* PNL */
@@ -137,6 +146,7 @@ input[type=file]{display:none}
     <span class="pill p-off" id="reg-pill">REGIME:STABLE</span>
     <span class="pill p-off" id="src-pill">SRC:NONE</span>
     <div id="pulse" class="dot"></div>
+    <span class="pill" id="trade-signal-pill" style="display:none;letter-spacing:1px;font-weight:700;animation:none"></span>
     <div class="tb-r">
       <span class="pill p-off" id="conn-pill">WS:DISC</span>
       <span id="ts-r">-- | BAR 0/0</span>
@@ -507,6 +517,8 @@ function openTrade(side){
   try{
     tradePriceLines[id]=candles.createPriceLine({price:lastPrice,color:side==='buy'?'#237a4566':'#aa282866',lineWidth:1,lineStyle:0,axisLabelVisible:true,title:`T${id} ${side.toUpperCase()}`});
   }catch{}
+  // ── TRADE SIGNAL BUTTONS ────────────────────────────────────────────────
+  updateTradeSignals(d);
   updateTradeUI();
 }
 
@@ -526,6 +538,84 @@ function closeAllTrades(){[...trades.map(t=>t.id)].forEach(closeTrade);}
 function openPnl(){
   if(!lastPrice||!trades.length)return 0;
   return trades.reduce((s,t)=>s+(t.side==='buy'?(lastPrice-t.price):(t.price-lastPrice))*10000*t.lots,0);
+}
+
+
+// ── TRADE SIGNAL ENGINE ───────────────────────────────────────────────────────
+function updateTradeSignals(d) {
+  const veto      = d.veto?.decision || 'Halt';
+  const pFused    = d.fusion?.p_fused || 0;
+  const confidence= d.fusion?.confidence || 0;
+  const amd       = d.amd?.state || 'Accumulation';
+  const bias      = d.bias?.bias || 'NEUTRAL';
+  const entrapped = d.vol_decay?.entrapped || false;
+  const killzone  = d.session?.killzone || false;
+
+  // Signal conditions
+  const canTrade   = veto === 'Proceed';
+  const strongBull = canTrade && pFused > 0.4  && confidence > 0.5
+                     && (bias === 'BULLISH') && amd === 'Distribution';
+  const strongBear = canTrade && pFused < -0.4 && confidence > 0.5
+                     && (bias === 'BEARISH') && amd === 'Distribution';
+  const setupReady = canTrade && entrapped && amd === 'Manipulation';
+  // Bonus: killzone amplifies signal
+  const kzBoost    = killzone ? 0.1 : 0;
+
+  const buySignal  = strongBull || (setupReady && bias === 'BULLISH') || pFused > (0.5 - kzBoost) && canTrade;
+  const sellSignal = strongBear || (setupReady && bias === 'BEARISH') || pFused < -(0.5 - kzBoost) && canTrade;
+
+  // Apply to BUY button
+  const btnBuy  = document.querySelector('.btn-buy');
+  const btnSell = document.querySelector('.btn-sell');
+  const btnCloseAll = document.querySelector('.btn-ca');
+
+  if (btnBuy)  btnBuy.classList.toggle('signal-active',  !!(buySignal  && !sellSignal));
+  if (btnSell) btnSell.classList.toggle('signal-active', !!(sellSignal && !buySignal));
+
+  // Close signal: open positions in profit AND veto fires (regime fracture / halt)
+  const shouldClose = trades.length > 0 && (
+    veto === 'Halt' ||
+    (trades.some(t => {
+      const pips = (t.side==='buy' ? (lastPrice-t.price) : (t.price-lastPrice)) * 10000 * t.lots;
+      return pips > 2; // profitable by 2+ pips
+    }) && (
+      amd === 'Retracement' ||
+      d.manipulation?.active ||
+      d.harmonic?.inverted ||
+      d.topology?.fractured
+    ))
+  );
+
+  if (btnCloseAll) btnCloseAll.classList.toggle('close-signal', shouldClose);
+
+  // Apply close signal to individual position CLOSE buttons
+  document.querySelectorAll('.pcls').forEach(btn => {
+    btn.classList.toggle('close-signal', shouldClose);
+  });
+
+  // Update signal indicator in titlebar
+  let sigText = '';
+  if (buySignal  && !sellSignal) sigText = '▲ BUY SIGNAL';
+  if (sellSignal && !buySignal)  sigText = '▼ SELL SIGNAL';
+  if (shouldClose)               sigText = sigText ? sigText + ' · CLOSE' : '◆ CLOSE SIGNAL';
+  const sigEl = document.getElementById('trade-signal-pill');
+  if (sigEl) {
+    sigEl.textContent = sigText || '';
+    sigEl.style.display = sigText ? '' : 'none';
+    sigEl.style.borderColor = shouldClose ? 'var(--alert)' :
+                              buySignal   ? 'var(--up)'    : 'var(--down)';
+    sigEl.style.color       = shouldClose ? 'var(--alert)' :
+                              buySignal   ? 'var(--up)'    : 'var(--down)';
+    if (sigText && !shouldClose) {
+      sigEl.style.animation = buySignal
+        ? 'signal-pulse-up 1.2s ease-in-out infinite'
+        : 'signal-pulse-dn 1.2s ease-in-out infinite';
+    } else if (shouldClose) {
+      sigEl.style.animation = 'signal-pulse-alert 1s ease-in-out infinite';
+    } else {
+      sigEl.style.animation = 'none';
+    }
+  }
 }
 
 function updateTradeUI(){
@@ -804,6 +894,16 @@ function setRunning(r){
   document.getElementById('pulse').style.display=r?'':'none';
 }
 function resetLocal(){
+  // Clear trade signals
+  const btnBuy = document.querySelector('.btn-buy');
+  const btnSell = document.querySelector('.btn-sell');
+  const btnCa = document.querySelector('.btn-ca');
+  if(btnBuy) btnBuy.classList.remove('signal-active');
+  if(btnSell) btnSell.classList.remove('signal-active');
+  if(btnCa) btnCa.classList.remove('close-signal');
+  const sp = document.getElementById('trade-signal-pill');
+  if(sp) sp.style.display='none';
+
   candles.setData([]);volSeries.setData([]);rmLines();
   Object.keys(tradePriceLines).forEach(id=>{try{candles.removePriceLine(tradePriceLines[id]);}catch{}});
   tradePriceLines={};LOGS.ev=[];LOGS.vt=[];LOGS.tr=[];
