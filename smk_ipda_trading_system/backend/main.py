@@ -91,7 +91,7 @@ def get_pipeline():
 # ── MODELS ────────────────────────────────────────────────────────────────────
 class CSVPayload(BaseModel):
     text: str
-    source_hint: Optional[str] = 'auto'
+    filename: Optional[str] = "upload.csv"
 
 class BitgetPayload(BaseModel):
     api_key: str; api_secret: str; symbol: str = "EURUSDT"
