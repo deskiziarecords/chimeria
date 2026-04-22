@@ -119,7 +119,44 @@ from plugins import SMKPlugin""",
     ),
 
 ]
-
+dict(
+    file="backend/smk_pipeline.py",
+    desc="ensure backend/ on sys.path before importing plugin_manager",
+    old="""\
+# Plugin system — lazy load to avoid circular imports
+_plugin_mgr = None
+def _get_plugins():
+    global _plugin_mgr
+    if _plugin_mgr is None:
+        try:
+            from plugin_manager import get_plugin_manager
+            _plugin_mgr = get_plugin_manager()
+        except Exception as e:
+            print(f"[SMK] Plugin manager not available: {e}")
+            _plugin_mgr = None
+    return _plugin_mgr""",
+    new="""\
+# Plugin system — lazy load to avoid circular imports
+_plugin_mgr = None
+_plugin_mgr_failed = False
+def _get_plugins():
+    global _plugin_mgr, _plugin_mgr_failed
+    if _plugin_mgr_failed:
+        return None
+    if _plugin_mgr is None:
+        try:
+            import sys as _sys
+            _bd = os.path.dirname(os.path.abspath(__file__))
+            if _bd not in _sys.path:
+                _sys.path.insert(0, _bd)
+            from plugin_manager import get_plugin_manager
+            _plugin_mgr = get_plugin_manager()
+        except Exception as e:
+            print(f"[SMK] Plugin manager not available: {e}")
+            _plugin_mgr_failed = True
+            _plugin_mgr = None
+    return _plugin_mgr""",
+),
 # ─────────────────────────────────────────────────────────────────────────────
 
 for p in PATCHES:
