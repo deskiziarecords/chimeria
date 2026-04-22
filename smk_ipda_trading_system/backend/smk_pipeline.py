@@ -1,4 +1,4 @@
-def step(self):
+     def step(self):
         if self.cursor >= len(self.raw_bars):
             return None
         idx = self.cursor
