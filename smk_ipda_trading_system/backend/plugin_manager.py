@@ -7,10 +7,17 @@ from __future__ import annotations
 
 import importlib
 import os
+import sys
 import traceback
 from typing import Dict, List, Optional
 import pandas as pd
 import numpy as np
+
+# Ensure backend/ is on sys.path so 'plugins' package is importable
+# regardless of which directory uvicorn was started from.
+_backend_dir = os.path.dirname(os.path.abspath(__file__))
+if _backend_dir not in sys.path:
+    sys.path.insert(0, _backend_dir)
 
 from plugins import SMKPlugin
 
