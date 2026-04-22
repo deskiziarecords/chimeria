@@ -5,8 +5,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 import uvicorn, asyncio, json, os, traceback
 import numpy as np
-from typing import Optional
+from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
+from chimeria_agnostic_ai import AgnosticAIService, AIModelConfig, AIProvider
 
 app = FastAPI(title="QUIMERIA SMK API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
@@ -191,6 +192,58 @@ def read_log(filename: str, lines: int = 100):
 @app.get("/api/ping")
 def ping():
     return {"status": "ok", "pipeline_ready": _pipeline is not None}
+
+# ── AI ASSISTANT ──────────────────────────────────────────────────────────────
+_ai_services = {}
+
+def get_ai_service(provider: str, api_key: str = None) -> AgnosticAIService:
+    """Get or create AI service for provider"""
+    key = f"{provider}_{api_key[:8] if api_key else 'default'}"
+    if key not in _ai_services:
+        try:
+            config = AIModelConfig(
+                provider=AIProvider(provider),
+                api_key=api_key or os.environ.get(f"{provider.upper()}_API_KEY"),
+                model_name={
+                    'gemini': 'gemini-2.0-flash-exp',
+                    'openai': 'gpt-4o-mini',
+                    'anthropic': 'claude-3-haiku-20240307',
+                    'ollama': 'llama3.2'
+                }.get(provider, 'gemini-2.0-flash-exp'),
+                api_base=os.environ.get(f"{provider.upper()}_API_BASE")
+            )
+            _ai_services[key] = AgnosticAIService(config)
+        except Exception as e:
+            print(f"[AI] Failed to init {provider}: {e}")
+            raise e
+    return _ai_services[key]
+
+class AIAskPayload(BaseModel):
+    prompt: str
+    provider: str = "gemini"
+    context: Optional[dict] = None
+
+@app.post("/api/ai/ask")
+async def ai_ask(payload: AIAskPayload):
+    """Ask AI model about market conditions with SMK context"""
+    try:
+        service = get_ai_service(payload.provider)
+        result = await service.ask(payload.prompt, payload.context)
+        return result
+    except Exception as e:
+        return {"error": str(e), "response": f"AI error: {e}"}
+
+@app.get("/api/ai/providers")
+async def ai_providers():
+    """List available AI providers"""
+    return {
+        "providers": [
+            {"id": "gemini", "name": "Google Gemini", "requires_key": True},
+            {"id": "openai", "name": "OpenAI GPT", "requires_key": True},
+            {"id": "anthropic", "name": "Anthropic Claude", "requires_key": True},
+            {"id": "ollama", "name": "Ollama (Local)", "requires_key": False, "default_url": "http://localhost:11434"},
+        ]
+    }
 
 # ── WEBSOCKET ─────────────────────────────────────────────────────────────────
 
