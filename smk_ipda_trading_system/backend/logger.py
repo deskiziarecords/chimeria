@@ -49,6 +49,10 @@ _trade_log  = _make_logger("smk.trades",  "trades.log")     # entries, exits, P&
 _session_log= _make_logger("smk.session", "session.log")    # startup, shutdown, data loads
 _raw_log    = _make_logger("smk.raw",     "raw_bars.log",   max_mb=50)  # full bar JSON
 
+# Trade ID counter — persists for session lifetime
+_trade_counter = 0
+_open_trades: dict = {}   # trade_id → {side, price, lots, symbol, sl, tp}
+
 
 def _ts() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -146,11 +150,77 @@ def log_bar(bar_result: dict):
     for ev in events:
         _event_log.info(f"[{_ts()}] {label} | {ev}")
 
+    # ── TRADE LOG — fire on TRADE action from execution bridge ───────────────
+    exe = bar_result.get("execution", {})
+    if exe:
+        _log_execution(exe, label, bar.get("close", 0))
+
     # ── RAW BAR LOG ───────────────────────────────────────────────────────────
     try:
         _raw_log.info(json.dumps(bar_result, separators=(',', ':')))
     except Exception:
         pass
+
+
+def _log_execution(exe: dict, label: str, close: float):
+    """
+    Internal: called from log_bar() to write trade open/close entries.
+    Tracks open positions in _open_trades so it can log P&L on close.
+    """
+    global _trade_counter, _open_trades
+
+    action   = exe.get("action", "")
+    is_armed = exe.get("is_armed", False)
+    direction= exe.get("direction", 0)
+    sl       = exe.get("stop_loss_price", 0.0)
+    tp       = exe.get("take_profit_price", 0.0)
+    lots     = exe.get("lot_size", 0.0)
+    pips     = exe.get("risk_pips", 0.0)
+    rr       = exe.get("rr_ratio", 0.0)
+    pattern  = exe.get("pattern", "")
+    dominant = exe.get("dominant", "X")
+    kelly    = exe.get("kelly_size", 0.0)
+    de       = exe.get("delta_e", 0.0)
+
+    side = "LONG" if direction == 1 else "SHORT" if direction == -1 else "FLAT"
+
+    # ── TRADE OPEN ────────────────────────────────────────────────────────────
+    if action == "TRADE" and is_armed and lots > 0:
+        _trade_counter += 1
+        tid = _trade_counter
+        _open_trades[tid] = {
+            "side":  side,
+            "price": close,
+            "lots":  lots,
+            "sl":    sl,
+            "tp":    tp,
+        }
+        _trade_log.info(
+            f"[{_ts()}] OPEN   T{tid:04d} {side:5s} {lots:.2f}L "
+            f"@ {close:.5f} | "
+            f"SL={sl:.5f} TP={tp:.5f} | "
+            f"pips={pips:.1f} RR={rr:.2f} | "
+            f"pattern=[{dominant}]{pattern} kelly={kelly:.4f} ΔE={de:+.4f} | "
+            f"{label}"
+        )
+
+    # ── TRADE CLOSE / HALT — check if any open position just got stopped ──────
+    # Close is inferred when a previously TRADE bar transitions to HALT/REDUCE
+    # and we have an open position. Calculate P&L against current close price.
+    elif action in ("HALT", "REDUCE") and _open_trades:
+        for tid, pos in list(_open_trades.items()):
+            entry   = pos["price"]
+            pos_dir = 1 if pos["side"] == "LONG" else -1
+            pnl_pips = (close - entry) * pos_dir / 0.0001
+            reason = exe.get("reason", action)
+            _trade_log.info(
+                f"[{_ts()}] CLOSE  T{tid:04d} {pos['side']:5s} {pos['lots']:.2f}L "
+                f"@ {close:.5f} | "
+                f"PNL={pnl_pips:+.1f}pips | "
+                f"reason={reason} | "
+                f"{label}"
+            )
+            del _open_trades[tid]
 
 
 def log_trade(action: str, trade_id: int, side: str, price: float,
