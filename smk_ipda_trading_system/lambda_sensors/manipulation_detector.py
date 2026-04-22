@@ -1,3 +1,8 @@
+"""
+FIXED: for lb in [11-13] → [-2]
+Original bug: Only iterated once with lb=-2, using 2-bar lookback for sweep detection
+"""
+
 import numpy as np
 import pandas as pd
 from dataclasses import dataclass
@@ -6,41 +11,36 @@ from typing import Dict, List, Optional
 @dataclass
 class ManipulationTelemetry:
     is_active: bool
-    confidence_score: float  # 0-100 heuristic score
-    sweep_level: str        # H20, L40, H60, etc.
-    wick_magnitude: float   # Ratio of extreme probe to body
+    confidence_score: float
+    sweep_level: str
+    wick_magnitude: float
     status: str
 
 class ManipulationPhaseDetector:
-    """
-    IPDA Layer 1 (Compiler) Extension: Detects Manipulation (Judas Swings).
-    Identifies institutional stop hunts via Wick Signatures at structural edges.
-    """
-    def __init__(self, wick_threshold: float = 3.0, threshold: int = 70):
-        self.wick_threshold = wick_threshold  # wick_size > (body_size * 3) [9]
+    def __init__(self, wick_threshold: float = 3.0, threshold: int = 70,
+                 lookbacks=[20, 40, 60]):  # FIXED: Added proper lookbacks parameter
+        self.wick_threshold = wick_threshold
         self.anomaly_threshold = threshold
+        self.lookbacks = lookbacks  # FIXED: Store lookbacks as instance variable
         self.state = "IDLE"
 
     def _calculate_ipda_ranges(self, df: pd.DataFrame) -> Dict:
-        """Synchronizes 20, 40, and 60-day lookback nodes [5, 10]."""
+        """Synchronizes 20, 40, and 60-day lookback nodes"""
         ranges = {}
-        for lb in [11-13]:
+        # FIXED: was [11-13] → [-2], now uses self.lookbacks
+        for lb in self.lookbacks:
             ranges[f'H{lb}'] = df['high'].tail(lb).max()
             ranges[f'L{lb}'] = df['low'].tail(lb).min()
         return ranges
 
     def detect_wick_signature(self, candle: dict) -> float:
-        """Calculates the ratio of wick rejection to body size [9, 14]."""
         body = abs(candle['close'] - candle['open'])
         upper_wick = candle['high'] - max(candle['open'], candle['close'])
         lower_wick = min(candle['open'], candle['close']) - candle['low']
         wick_size = upper_wick + lower_wick
-        
-        # Implementation of λ6 logic: Displacement Veto/Heuristic score
         return wick_size / (body + 1e-9)
 
     def scan_for_manipulation(self, df: pd.DataFrame, avg_vol: float) -> ManipulationTelemetry:
-        """Main execution logic for IPDA Phase 1 detection [15, 16]."""
         ranges = self._calculate_ipda_ranges(df)
         last_candle = df.iloc[-1].to_dict()
         price = last_candle['close']
@@ -48,7 +48,7 @@ class ManipulationPhaseDetector:
         score = 0
         detected_level = "NONE"
         
-        # 1. Edge Probe: Check if price touches or exceeds L60 boundaries [16, 17]
+        # FIXED: Now properly iterates over H20/L20, H40/L40, H60/L60
         for key, level in ranges.items():
             if (last_candle['high'] >= level and 'H' in key) or \
                (last_candle['low'] <= level and 'L' in key):
@@ -56,12 +56,10 @@ class ManipulationPhaseDetector:
                 detected_level = key
                 break
         
-        # 2. Wick Rejection Signature [9]
         wick_ratio = self.detect_wick_signature(last_candle)
         if wick_ratio > self.wick_threshold:
-            score += 30  # Signature of Stop Hunt [9]
+            score += 30
             
-        # 3. Volume Check: Institutional Footprint (>3σ) [9]
         if last_candle['volume'] > (avg_vol * 3):
             score += 30
             
@@ -75,4 +73,3 @@ class ManipulationPhaseDetector:
             wick_magnitude=wick_ratio,
             status=status
         )
-
