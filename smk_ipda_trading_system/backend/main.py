@@ -8,16 +8,13 @@ import numpy as np
 from typing import Optional
 from pydantic import BaseModel
 
-# IMPORTANT: Import logger functions at the top
-from logger import log_bar, log_session, log_data_load, log_trade, get_log_files, get_log_dir, LOG_DIR
-from realtime import live_feed
-
 app = FastAPI(title="QUIMERIA SMK API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
                    allow_methods=["*"], allow_headers=["*"])
 
 class _SafeEncoder(json.JSONEncoder):
     def default(self, obj):
+        # Use .item() which always returns a plain Python scalar for any numpy type
         try:
             import numpy as np
             if isinstance(obj, np.generic): return obj.item()
@@ -46,9 +43,12 @@ async def _err(request: Request, exc: Exception):
 # Resolve frontend path — try multiple locations
 def _find_frontend():
     candidates = [
+        # Relative to this file
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend"),
+        # Relative to CWD
         os.path.join(os.getcwd(), "frontend"),
         os.path.join(os.getcwd(), "..", "frontend"),
+        # Absolute common paths
         os.path.expanduser("~/chimeria/smk_ipda_trading_system/frontend"),
         os.path.expanduser("~/Documents/chimeria/smk_ipda_trading_system/frontend"),
     ]
@@ -57,7 +57,8 @@ def _find_frontend():
         if os.path.isfile(os.path.join(c, "index.html")):
             print(f"[FRONTEND] Found at: {c}")
             return c
-    print("[FRONTEND] WARNING: index.html not found")
+    print("[FRONTEND] WARNING: index.html not found in any candidate path")
+    print("[FRONTEND] Candidates tried:", candidates)
     return os.path.normpath(candidates[0])
 
 FRONTEND = _find_frontend()
@@ -74,7 +75,12 @@ def root():
     idx = os.path.join(FRONTEND, "index.html")
     if os.path.exists(idx):
         return FileResponse(idx)
-    return {"status": "SMK API running — frontend not found"}
+    return {
+        "status": "SMK API running — frontend not found",
+        "frontend_path_tried": FRONTEND,
+        "cwd": os.getcwd(),
+        "tip": "Run uvicorn from the backend/ directory, or set FRONTEND_DIR env var"
+    }
 
 # ── PIPELINE ──────────────────────────────────────────────────────────────────
 _pipeline = None
@@ -90,31 +96,19 @@ def get_pipeline():
 class CSVPayload(BaseModel):
     text: str
     filename: Optional[str] = "upload.csv"
-    source_hint: Optional[str] = "auto"
 
 class BitgetPayload(BaseModel):
-    api_key: str
-    api_secret: str
-    symbol: str = "EURUSDT"
-    granularity: str = "5m"
-    limit: int = 300
+    api_key: str; api_secret: str; symbol: str = "EURUSDT"
+    granularity: str = "5m"; limit: int = 300
 
 class OandaPayload(BaseModel):
-    token: str
-    account_id: str
-    instrument: str = "EUR_USD"
-    granularity: str = "M5"
-    count: int = 300
+    token: str; account_id: str; instrument: str = "EUR_USD"
+    granularity: str = "M5"; count: int = 300
 
 class ModuleConfig(BaseModel):
     disabled_modules: list = []
 
-class LivePayload(BaseModel):
-    api_key: str = ""
-    symbol: str = "EURUSDT"
-    granularity: str = "1m"
-
-# ── REST ENDPOINTS ────────────────────────────────────────────────────────────
+# ── REST ──────────────────────────────────────────────────────────────────────
 @app.post("/api/load/csv")
 async def load_csv(payload: CSVPayload):
     from data_connectors import load_csv_text
@@ -171,14 +165,20 @@ def get_status():
 
 @app.get("/api/logs")
 def get_logs():
+    """List all log files with sizes."""
     return {"log_dir": get_log_dir(), "files": get_log_files()}
 
 @app.get("/api/logs/{filename}")
 def read_log(filename: str, lines: int = 100):
+    """Read last N lines of a log file."""
+    import os
+    # Security: only allow .log files in our logs dir
     if not filename.endswith(".log") or "/" in filename or "\\" in filename:
+        from fastapi import HTTPException
         raise HTTPException(400, "Invalid filename")
     path = os.path.join(get_log_dir(), filename)
     if not os.path.exists(path):
+        from fastapi import HTTPException
         raise HTTPException(404, "Log file not found")
     with open(path, "r", encoding="utf-8") as f:
         all_lines = f.readlines()
@@ -192,51 +192,57 @@ def read_log(filename: str, lines: int = 100):
 def ping():
     return {"status": "ok", "pipeline_ready": _pipeline is not None}
 
-# ── LIVE FEED ENDPOINTS ───────────────────────────────────────────────────────
-@app.post("/api/live/start")
-async def live_start(payload: LivePayload):
-    p = get_pipeline()
-    live_feed.configure(payload.symbol, payload.granularity, payload.api_key, p)
-    live_feed.start(p)
-    return {"status": "ok", "symbol": payload.symbol, "granularity": payload.granularity}
+# ── WEBSOCKET ─────────────────────────────────────────────────────────────────
 
-@app.post("/api/live/stop")
-async def live_stop():
-    live_feed.stop()
-    return {"status": "stopped"}
+# ── EXECUTION / AEGIS BRIDGE ──────────────────────────────────────────────────
+class BridgeConfig(BaseModel):
+    capital:        float = 10_000.0
+    risk_per_trade: float = 0.01
+    n_venues:       int   = 1
+    kelly_limit:    float = 0.02
+    enabled:        bool  = True
 
-@app.get("/api/live/status")
-def live_status():
-    return {
-        "running": live_feed.running,
-        "symbol": live_feed.symbol,
-        "granularity": live_feed.granularity,
-        "clients": len(live_feed.clients),
-        "last_ts": live_feed.last_ts,
-    }
+@app.post("/api/execution/configure")
+def configure_execution(payload: BridgeConfig):
+    from aegis_bridge import get_bridge, AegisBridge, _bridge
+    import aegis_bridge as _ab
+    _ab._bridge = AegisBridge(
+        capital         = payload.capital,
+        risk_per_trade  = payload.risk_per_trade,
+        n_venues        = payload.n_venues,
+        kelly_limit     = payload.kelly_limit,
+        enabled         = payload.enabled,
+    )
+    return {"status": "ok", "config": payload.dict()}
 
-@app.websocket("/ws/live")
-async def live_stream(ws: WebSocket):
-    await ws.accept()
-    live_feed.add_client(ws)
+@app.get("/api/execution/stats")
+def execution_stats():
     try:
-        while True:
-            try:
-                msg = await asyncio.wait_for(ws.receive_text(), timeout=30)
-                if msg == "ping":
-                    await ws.send_text('{"type":"pong"}')
-            except asyncio.TimeoutError:
-                await ws.send_text('{"type":"ping"}')
-            except Exception:
-                break
-    finally:
-        live_feed.remove_client(ws)
+        from aegis_bridge import get_bridge
+        bridge = get_bridge()
+        return {"status": "ok", "stats": bridge.session_stats()}
+    except Exception as e:
+        return {"status": "unavailable", "error": str(e)}
 
-# ── WEBSOCKET STREAM ─────────────────────────────────────────────────────────
+@app.get("/api/execution/status")
+def execution_status():
+    try:
+        from aegis_bridge import get_bridge
+        bridge = get_bridge()
+        return {
+            "slm_available":   bridge._slm_available,
+            "aegis_available": bridge._aegis_available,
+            "enabled":         bridge.enabled,
+            "capital":         bridge.capital,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.websocket("/ws/stream")
 async def stream(ws: WebSocket):
     await ws.accept()
 
+    # Init pipeline — send error but KEEP socket open on failure
     try:
         p = get_pipeline()
     except Exception as e:
@@ -256,18 +262,14 @@ async def stream(ws: WebSocket):
                 except Exception as e:
                     print(f"[STEP ERR] {e}")
                     traceback.print_exc()
-                    try:
-                        await ws.send_text(_j({"type": "error", "message": str(e)}))
-                    except Exception:
-                        pass
+                    try: await ws.send_text(_j({"type": "error", "message": str(e)}))
+                    except Exception: pass
                     p.running = False
                     break
 
                 if result is None:
-                    try:
-                        await ws.send_text(_j({"type": "done"}))
-                    except Exception:
-                        pass
+                    try: await ws.send_text(_j({"type": "done"}))
+                    except Exception: pass
                     p.running = False
                     break
 
@@ -280,6 +282,7 @@ async def stream(ws: WebSocket):
                     break
 
                 await asyncio.sleep(max(0.016, speed_ms / 1000.0))
+
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -293,14 +296,13 @@ async def stream(ws: WebSocket):
         if run_task and not run_task.done():
             p.running = False
             run_task.cancel()
-            try:
-                await run_task
-            except asyncio.CancelledError:
-                pass
+            try: await run_task
+            except asyncio.CancelledError: pass
         run_task = None
 
     try:
         async for raw in ws.iter_text():
+            # Parse — skip malformed
             try:
                 cmd = json.loads(raw)
             except Exception:
@@ -308,30 +310,36 @@ async def stream(ws: WebSocket):
 
             action = cmd.get("action", "")
 
+            # Each action is wrapped so errors never close the connection
             try:
                 if action == "run":
                     await cancel_run()
                     speed_ms = max(16, int(cmd.get("speed") or 300))
                     p.running = True
                     run_task = asyncio.create_task(run_loop(speed_ms))
+
                 elif action == "step":
                     await cancel_run()
                     result = await loop.run_in_executor(None, p.step)
-                    await ws.send_text(_j({"type": "bar", "data": result} if result else {"type": "done"}))
+                    await ws.send_text(_j({"type": "bar", "data": result}
+                                          if result else {"type": "done"}))
+
                 elif action == "stop":
                     await cancel_run()
                     await ws.send_text(_j({"type": "stopped"}))
+
                 elif action == "reset":
                     await cancel_run()
                     p.reset_cursor()
                     await ws.send_text(_j({"type": "reset"}))
+
             except Exception as cmd_err:
+                # Bad command — log and continue, do NOT close connection
                 print(f"[CMD '{action}'] {cmd_err}")
                 traceback.print_exc()
-                try:
-                    await ws.send_text(_j({"type": "error", "message": str(cmd_err)}))
-                except Exception:
-                    pass
+                try: await ws.send_text(_j({"type": "error", "message": str(cmd_err)}))
+                except Exception: pass
+
     except WebSocketDisconnect:
         pass
     except Exception as e:
@@ -340,10 +348,77 @@ async def stream(ws: WebSocket):
         p.running = False
         if run_task and not run_task.done():
             run_task.cancel()
-            try:
-                await run_task
-            except asyncio.CancelledError:
-                pass
+            try: await run_task
+            except asyncio.CancelledError: pass
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
+
+# ── PLUGIN MANAGEMENT ─────────────────────────────────────────────────────────
+@app.get("/api/plugins")
+def list_plugins():
+    from plugin_manager import get_plugin_manager
+    mgr = get_plugin_manager()
+    return {"plugins": mgr.get_status(), "errors": mgr.load_errors}
+
+class PluginToggle(BaseModel):
+    enabled: list = []   # list of plugin names to enable (others disabled)
+
+@app.post("/api/plugins/toggle")
+def toggle_plugins(payload: PluginToggle):
+    from plugin_manager import get_plugin_manager
+    mgr = get_plugin_manager()
+    if payload.enabled:
+        mgr.set_enabled(payload.enabled)
+    return {"status": "ok", "enabled": payload.enabled}
+
+# ── LIVE FEED ──────────────────────────────────────────────────────────────────
+from realtime import live_feed
+from logger import log_bar, log_session, log_data_load, log_trade, get_log_files, get_log_dir, LOG_DIR
+
+class LivePayload(BaseModel):
+    api_key:     str = ""
+    symbol:      str = "EURUSDT"
+    granularity: str = "1m"
+
+@app.post("/api/live/start")
+async def live_start(payload: LivePayload):
+    p = get_pipeline()
+    live_feed.configure(payload.symbol, payload.granularity, payload.api_key, p)
+    live_feed.start(p)
+    return {"status": "ok", "symbol": payload.symbol, "granularity": payload.granularity}
+
+@app.post("/api/live/stop")
+async def live_stop():
+    live_feed.stop()
+    return {"status": "stopped"}
+
+@app.get("/api/live/status")
+def live_status():
+    return {
+        "running":     live_feed.running,
+        "symbol":      live_feed.symbol,
+        "granularity": live_feed.granularity,
+        "clients":     len(live_feed.clients),
+        "last_ts":     live_feed.last_ts,
+    }
+
+@app.websocket("/ws/live")
+async def live_stream(ws):
+    from fastapi import WebSocket
+    await ws.accept()
+    live_feed.add_client(ws)
+    try:
+        # Keep alive — client sends pings
+        while True:
+            try:
+                msg = await asyncio.wait_for(ws.receive_text(), timeout=30)
+                if msg == "ping":
+                    await ws.send_text('{"type":"pong"}')
+            except asyncio.TimeoutError:
+                await ws.send_text('{"type":"ping"}')
+            except Exception:
+                break
+    finally:
+        live_feed.remove_client(ws)
