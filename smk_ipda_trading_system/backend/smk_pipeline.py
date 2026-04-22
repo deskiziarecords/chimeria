@@ -103,6 +103,8 @@ class SMKPipeline:
         try_load('kl',           lambda: _imp('detectors.kl_divergence_detector', 'KLDivergenceDetector')(threshold=0.65))
         try_load('fusion',       lambda: _imp('lambda_fusion_engine', 'LambdaFusionEngine')())
         try_load('mandra',       lambda: _imp('risk.mandra_kernels', 'MandraGate')())
+        try_load("lambda7",      lambda: _imp("lambda_sensors.macro_causality_gate", "get_lambda7")())
+        try_load("lambda8",      lambda: _imp("lambda_sensors.light_cone_violation", "get_lambda8")())
         try_load('topology',     lambda: _imp('detectors.topological_fracture_detector', 'TopologicalFractureDetector')())
         ok = [k for k, v in self.modules.items() if v is not None]
         bad = self._import_errors
