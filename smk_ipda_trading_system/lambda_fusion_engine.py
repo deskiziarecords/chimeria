@@ -29,13 +29,14 @@ class LambdaFusionEngine:
         
         # Default weights for the 7 lambda sensors (can be adapted online)
         self.lambda_weights = lambda_weights or {
-            "λ1_vol_decay": 0.18,      # Entrapment / volatility exhaustion
-            "λ2_session": 0.12,        # Temporal alignment (killzones)
-            "λ3_harmonic": 0.15,       # Spectral inversion / phase trap
-            "λ4_manipulation": 0.14,   # Judas swing / stop hunt
-            "λ5_displacement": 0.16,   # True institutional expansion
-            "λ6_bias": 0.13,           # Structural bias & equilibrium
-            "λ7_regime": 0.12,         # KL divergence + topological fracture
+              "λ1_vol_decay": 0.14,
+              "λ2_session": 0.08,
+              "λ3_harmonic": 0.12,
+              "λ4_manipulation": 0.10,
+              "λ5_displacement": 0.12,
+              "λ6_bias": 0.10,
+              "λ7_macro": 0.18,      # ← NEW: Macro causality gate
+              "λ8_light_cone": 0.16, 
         }
         
         self.veto_threshold = veto_threshold      # Confidence required to override veto
