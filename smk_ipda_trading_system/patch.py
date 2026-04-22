@@ -42,7 +42,34 @@ def apply(file: str, old: str, new: str, desc: str):
 # ─────────────────────────────────────────────────────────────────────────────
 # PATCHES — add new ones here, old ones stay for reference
 # ─────────────────────────────────────────────────────────────────────────────
-
+dict(
+    file="backend/main.py",
+    desc="fix source_hint AttributeError — Pydantic v2 Optional field syntax",
+    old="""\
+class CSVPayload(BaseModel):
+    text: str
+    filename: Optional[str] = "upload.csv"
+    source_hint: Optional[str] = "auto"\
+""",
+    new="""\
+class CSVPayload(BaseModel):
+    text: str
+    filename: str = "upload.csv"
+    source_hint: str = "auto"\
+""",
+),
+dict(
+    file="backend/main.py",
+    desc="fix source_hint access — use model_fields safe access",
+    old="bars = load_csv_text(payload.text, source_hint=payload.source_hint or 'auto')",
+    new="bars = load_csv_text(payload.text, source_hint=getattr(payload, 'source_hint', None) or 'auto')",
+),
+dict(
+    file="backend/main.py",
+    desc="fix filename access same way",
+    old="log_data_load(payload.source_hint or \"csv\", len(bars), payload.filename or \"\")",
+    new="log_data_load(getattr(payload, 'source_hint', None) or 'csv', len(bars), getattr(payload, 'filename', None) or '')",
+),
 PATCHES = [
 
     # ── plugin_manager.py: sys.path guard ────────────────────────────────────
