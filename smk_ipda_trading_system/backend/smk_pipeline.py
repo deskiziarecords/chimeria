@@ -564,7 +564,92 @@ class SMKPipeline:
         if r['fusion']['confidence'] < 0.2:                  reasons.append('CONF:INSUFFICIENT')
         decision = 'Halt' if reasons else 'Reset' if r['amd']['R_MASTER'] else 'Proceed'
         return {'decision': decision, 'reasons': reasons, 'trade_allowed': decision == 'Proceed'}
+     def _lambda7_macro(self, r, bar, direction):
+    """Run λ₇ Macro Causality Gate"""
+    try:
+        gate = self.modules.get("lambda7")
+        if gate:
+            # Need DXY price from somewhere - you'll need to add this to your bars
+            dxy_price = bar.get('dxy', 105.0)  # Fetch from data source
+            spx_price = bar.get('spx', 4500.0)
+            
+            telemetry = gate.step(
+                symbol="EURUSD",
+                direction=direction,
+                current_price=bar['close'],
+                dxy_price=dxy_price,
+                spx_price=spx_price
+            )
+            
+            r['lambda_7'] = {
+                'score': telemetry.score,
+                'active': telemetry.active,
+                'status': telemetry.status,
+                'dxy_correlation': telemetry.dxy_correlation,
+                'dxy_veto': telemetry.dxy_veto_triggered,
+                'signal_valid': telemetry.signal_valid,
+                'risk_regime': telemetry.risk_regime
+            }
+            
+            # Add to sensors
+            r['sensors'].append({
+                'id': 'λ₇',
+                'name': 'Macro Gate',
+                'score': telemetry.score,
+                'active': telemetry.active,
+                'layer': 'L5-MACRO',
+                'status': telemetry.status
+            })
+            
+            # Apply veto
+            if telemetry.dxy_veto_triggered:
+                r['veto']['decision'] = 'Halt'
+                r['veto']['reasons'].append(f"λ₇: {telemetry.veto_reason}")
+    except Exception as e:
+        print(f"[SMK] λ₇ error: {e}")
 
+
+def _lambda8_light_cone(self, r, bar):
+    """Run λ₈ Light-Cone Violation Detector"""
+    try:
+        detector = self.modules.get("lambda8")
+        if detector:
+            dxy_price = bar.get('dxy', 105.0)
+            spx_price = bar.get('spx', 4500.0)
+            
+            telemetry = detector.step(
+                target_price=bar['close'],
+                dxy_price=dxy_price,
+                spx_price=spx_price
+            )
+            
+            r['lambda_8'] = {
+                'score': telemetry.score,
+                'active': telemetry.active,
+                'status': telemetry.status,
+                'violation_detected': telemetry.violation_detected,
+                'violation_type': telemetry.violation_type,
+                'dxy_z_score': telemetry.dxy_z_score,
+                'target_z_score': telemetry.target_z_score,
+                'kill_switch': telemetry.kill_switch_triggered
+            }
+            
+            r['sensors'].append({
+                'id': 'λ₈',
+                'name': 'Light-Cone',
+                'score': telemetry.score,
+                'active': telemetry.active,
+                'layer': 'L0-ALPHA',
+                'status': telemetry.status
+            })
+            
+            # Kill switch overrides everything
+            if telemetry.kill_switch_triggered:
+                r['veto']['decision'] = 'Halt'
+                r['veto']['reasons'].append(f"λ₈: {telemetry.kill_switch_reason}")
+                r['execution']['action'] = 'HALT'
+    except Exception as e:
+        print(f"[SMK] λ₈ error: {e}")
     def _sensors(self, r):
         vd = r['vol_decay']; ex = r['expansion']; ha = r['harmonic']
         dr = r['dealing_range']; di = r['displacement']; fv = r['fvg']
