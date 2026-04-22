@@ -1,47 +1,59 @@
+"""
+FIXED: dgms[14] → dgms[1] (proper H1 homology dimension)
+FIXED: Added infinite death handling for persistent features
+Original bug: ripser returns list of 2 arrays (H0, H1), index 14 doesn't exist
+"""
+
 import numpy as np
 from ripser import ripser
-from scipy.spatial import Delaunay
 from dataclasses import dataclass
-from typing import List, Dict, Tuple
+from typing import List
 
 @dataclass
 class TopologyTelemetry:
-    h1_persistence_score: float # Sum of lifetimes of H1 loops
-    is_fractured: bool         # Logic: True if score > threshold
-    active_islands: int        # Count of connected components
-    status: str                # Diagnostic: COMPACT_CLOUD or GEOMETRY_FRACTURE
+    h1_persistence_score: float
+    is_fractured: bool
+    active_islands: int
+    status: str
 
 class TopologicalFractureDetector:
-    """
-    TDA Hole Detector: Identifies Structural Regime Fractures (H1 Persistent Loops).
-    Treats OHLCV as a 4D point cloud to detect when signal geometry breaks.
-    """
     def __init__(self, persistence_threshold: float = 0.6, fracture_limit: float = 0.5):
         self.threshold = persistence_threshold
         self.fracture_limit = fracture_limit
 
     def create_point_cloud(self, prices: np.ndarray, volumes: np.ndarray, ofi: np.ndarray) -> np.ndarray:
-        """Generates the high-dimensional point cloud [11, 12]."""
         time_steps = np.arange(len(prices))
-        # Stack into N x 4 cloud (Time, Price, Volume, OFI)
         return np.column_stack((time_steps, prices, volumes, ofi))
 
     def detect_fracture(self, data_cloud: np.ndarray) -> TopologyTelemetry:
-        """
-        Unwraps high-dimensional data into UV islands and H1 holes [13].
-        H1 loops signify the market is cycling without progressing [5].
-        """
-        # Run Vietoris-Rips Filtration [5, 13]
-        # maxdim=1 extracts H0 (islands) and H1 (loops)
         dgms = ripser(data_cloud, maxdim=1)['dgms']
-        h1_intervals = dgms[14] # H1 lifetimes represent structural conflict [15]
-
-        # Calculate lifetimes (Death - Birth)
-        lifetimes = h1_intervals[:, 1] - h1_intervals[:, 0]
-        distortion_score = np.sum(lifetimes) # Total persistent H1 energy [13]
         
-        # Identification of 'UV Islands' (connected components)
-        active_islands = np.sum(lifetimes > self.threshold)
+        # FIXED: dgms[1] for H1 (1-dimensional homology), not dgms[14]
+        # dgms is a list where dgms[0] = H0, dgms[1] = H1
+        h1_intervals = dgms[1]  # FIXED: was dgms[14] (IndexError)
+        
+        if len(h1_intervals) == 0:
+            return TopologyTelemetry(
+                h1_persistence_score=0.0,
+                is_fractured=False,
+                active_islands=0,
+                status="COMPACT_CLOUD"
+            )
+        
+        # FIXED: Handle infinite lifetimes (death = inf for persistent features)
+        lifetimes = []
+        for birth, death in h1_intervals:
+            if np.isinf(death):
+                lifetimes.append(self.fracture_limit * 2)  # Treat as very persistent
+            else:
+                lifetimes.append(death - birth)
+        
+        lifetimes = np.array(lifetimes)
+        distortion_score = np.sum(lifetimes)
+        
+        # FIXED: H0 intervals represent connected components, not H1 lifetimes
+        h0_intervals = dgms[0]
+        active_islands = np.sum(h0_intervals[:, 1] - h0_intervals[:, 0] > self.threshold)
 
         is_fractured = distortion_score > self.fracture_limit
         status = "GEOMETRY_FRACTURE" if is_fractured else "COMPACT_CLOUD"
@@ -52,8 +64,3 @@ class TopologicalFractureDetector:
             active_islands=int(active_islands),
             status=status
         )
-
-# --- CAUSAL GATE INTEGRATION [16, 17] ---
-# if telemetry.is_fractured:
-#    u_t = 0 # Ring 0 Veto Authority
-
